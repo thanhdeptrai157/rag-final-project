@@ -1,0 +1,17 @@
+pymupdf
+lxml
+
+regex
+underthesea
+rapidfuzz
+
+tiktoken
+
+sentence-transformers
+
+qdrant-client
+
+pydantic
+python-dotenv
+loguru
+tqdm
