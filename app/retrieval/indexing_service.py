@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import List, Dict, Any
 
 from app.schemas.chunk import Chunk
-import text
 
 
 def chunk_to_payload(chunk: Chunk) -> Dict[str, Any]:

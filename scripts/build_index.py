@@ -13,6 +13,7 @@ from app.preprocessing.cleaners.text_cleaner import TextCleaner
 from app.retrieval.indexing_service import chunk_to_payload, prepare_text_for_embedding
 from app.schemas.document import Document
 from app.vectordb.qdrant_store import QdrantStore
+from app.core.config import Config
 
 
 def main():
@@ -20,7 +21,11 @@ def main():
     cleaner = TextCleaner()
     chunker = RegulationChunker()
     embedder = Embbedder(model_name="BAAI/bge-m3")
-    store = QdrantStore(collection_name="regulations")
+    store = QdrantStore(
+        collection_name=Config.QDRANT_COLLECTION,
+        url=Config.QDRANT_HOST_URL,
+        api_key=Config.QDRANT_API_KEY,
+    )
 
     raw_dir = Path("data/raw")
     supported_suffixes = {".pdf"}
@@ -70,9 +75,9 @@ def main():
     )
     store.recreate_collection(vector_size=vector_size)
 
-    ids = [str(uuid.uuid4()) for _ in all_chunks]
-    print(f"[QDRANT] Upserting vectors with IDs: {ids[:5]}... (showing first 5)")
-    store.upsert_chunks(ids=ids, vectors=vectors, payloads=payloads)
+    ids = [str(chunk.chunk_id) for chunk in all_chunks]
+    print(f"[QDRANT] Upserting vectors with IDs (batch mode, 100 per batch)...")
+    store.upsert_chunks(ids=ids, vectors=vectors, payloads=payloads, batch_size=100)
     print("[DONE] Indexing complete.")
 
 

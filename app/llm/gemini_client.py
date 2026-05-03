@@ -13,7 +13,7 @@ class GeminiClient:
             model="gemma-3-27b-it",
             contents=prompt,
             config={
-                "temperature": 0.2,
+                "temperature": 0.5,
             },
         )
         return response.text

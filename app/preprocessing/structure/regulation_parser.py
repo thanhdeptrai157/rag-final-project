@@ -52,7 +52,6 @@ class RegulationParser:
         current_chapter: Optional[str] = None
         current_section: Optional[str] = None
 
-        # chapter/section đang áp cho article hiện tại
         article_chapter: Optional[str] = None
         article_section: Optional[str] = None
 

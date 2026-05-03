@@ -4,12 +4,17 @@ from typing import List, Dict, Any
 
 from app.embedding.sentence_transformer_embedder import Embbedder
 from app.vectordb.qdrant_store import QdrantStore
+from app.core.config import Config
 
 
 class Retriever:
     def __init__(self):
         self.embedder = Embbedder(model_name="BAAI/bge-m3")
-        self.store = QdrantStore(collection_name="regulations")
+        self.store = QdrantStore(
+            collection_name=Config.QDRANT_COLLECTION,
+            url=Config.QDRANT_HOST_URL,
+            api_key=Config.QDRANT_API_KEY,
+        )
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         query_vector = self.embedder.embed_query(query)

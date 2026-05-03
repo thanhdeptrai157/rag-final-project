@@ -7,11 +7,11 @@ class RagService:
         self.retriever = Retriever()
         self.llm = GeminiClient()
 
-    def answer_query(self, query: str, top_k: int = 5) -> dict:
+    def answer_query(self, query: str, top_k: int = 1) -> dict:
         results = self.retriever.retrieve(query, top_k=top_k)
         contexts = []
         sources = []
-
+        print("Retrieved contexts:", results)
         for item in results:
             text = item.get("text")
             if text:

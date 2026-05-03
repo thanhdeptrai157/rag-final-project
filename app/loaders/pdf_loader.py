@@ -6,8 +6,11 @@ import pytesseract
 from PIL import Image, ImageFilter, ImageOps
 
 from app.schemas.document import Document
+from app.core.config import Config
 
-pytesseract.pytesseract.tesseract_cmd = r"D:\Program Files\Tesseract-OCR\tesseract.exe"
+# Set Tesseract path từ config (nếu không set thì dùng system PATH)
+if Config.TESSERACT_CMD:
+    pytesseract.pytesseract.tesseract_cmd = Config.TESSERACT_CMD
 
 
 class PDFLoader:
