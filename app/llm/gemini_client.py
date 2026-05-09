@@ -10,7 +10,7 @@ class GeminiClient:
     def generate_response(self, query: str, context: str) -> str:
         prompt = build_rag_prompt(query=query, context=context)
         response = self.client.models.generate_content(
-            model="gemma-3-27b-it",
+            model="gemini-2.5-flash",
             contents=prompt,
             config={
                 "temperature": 0.5,

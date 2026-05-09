@@ -51,6 +51,14 @@ class ProcessingJobRepository:
             query = query.filter(ProcessingJob.document_id == document_id)
         return query.limit(limit).all()
 
+    def get_jobs_by_document(self, document_id: uuid.UUID) -> List[ProcessingJob]:
+        return (
+            self.db.query(ProcessingJob)
+            .filter(ProcessingJob.document_id == document_id)
+            .order_by(ProcessingJob.created_at.asc())
+            .all()
+        )
+
     def update_job_status(
         self,
         job_id: uuid.UUID,
@@ -131,6 +139,18 @@ class DocumentVersionRepository:
         self.db.refresh(version)
         return version
 
+    def list_versions(
+        self, document_id: uuid.UUID, page: int = 1, page_size: int = 20
+    ) -> tuple[List[DocumentVersion], int]:
+        query = (
+            self.db.query(DocumentVersion)
+            .filter(DocumentVersion.document_id == document_id)
+            .order_by(DocumentVersion.version_no.desc())
+        )
+        total = query.count()
+        items = query.offset((page - 1) * page_size).limit(page_size).all()
+        return items, total
+
     def get_latest_version(self, document_id: uuid.UUID) -> Optional[DocumentVersion]:
         """Lấy phiên bản mới nhất của document."""
         return (
@@ -139,6 +159,34 @@ class DocumentVersionRepository:
             .order_by(DocumentVersion.version_no.desc())
             .first()
         )
+
+    def get_by_id(self, version_id: uuid.UUID) -> Optional[DocumentVersion]:
+        return (
+            self.db.query(DocumentVersion)
+            .filter(DocumentVersion.version_id == version_id)
+            .first()
+        )
+
+    def get_by_document_and_id(
+        self, document_id: uuid.UUID, version_id: uuid.UUID
+    ) -> Optional[DocumentVersion]:
+        return (
+            self.db.query(DocumentVersion)
+            .filter(DocumentVersion.document_id == document_id)
+            .filter(DocumentVersion.version_id == version_id)
+            .first()
+        )
+
+    def update(self, version: DocumentVersion, **fields) -> DocumentVersion:
+        for key, value in fields.items():
+            setattr(version, key, value)
+        self.db.commit()
+        self.db.refresh(version)
+        return version
+
+    def delete(self, version: DocumentVersion) -> None:
+        self.db.delete(version)
+        self.db.commit()
 
 
 class ChunkRepository:

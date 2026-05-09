@@ -32,3 +32,20 @@ class R2Storage:
     def download_bytes(self, object_key: str) -> bytes:
         response = self.s3_client.get_object(Bucket=self.bucket_name, Key=object_key)
         return response["Body"].read()
+
+    def delete_object(self, object_key: str) -> None:
+        self.s3_client.delete_object(Bucket=self.bucket_name, Key=object_key)
+
+    def generate_presigned_url(self, object_key: str, expires_in: int = 3600) -> str:
+        """Generate a presigned URL for GET access to an object in R2."""
+        try:
+            url = self.s3_client.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": self.bucket_name, "Key": object_key},
+                ExpiresIn=expires_in,
+            )
+            return url
+        except Exception:
+            # If presign fails, return a direct R2 URL as best-effort
+            endpoint = f"https://{AppConfig.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+            return f"{endpoint}/{self.bucket_name}/{object_key}"

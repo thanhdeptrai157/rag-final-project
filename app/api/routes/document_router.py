@@ -1,6 +1,19 @@
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from uuid import UUID
 
-from app.schemas.document import DocumentUploadResponse
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
+
+from app.schemas.document import (
+    DocumentDeleteResponse,
+    DocumentDetailResponse,
+    DocumentListResponse,
+    DocumentUpdateRequest,
+    DocumentUploadResponse,
+    DocumentVersionDeleteResponse,
+    DocumentVersionDetailResponse,
+    DocumentVersionListResponse,
+    DocumentVersionUpdateRequest,
+)
 from app.api.service.document_service import DocumentService
 
 document_router = APIRouter()
@@ -17,3 +30,99 @@ async def upload_document(
 ) -> DocumentUploadResponse:
     return await service.create_document(file)
 
+
+@document_router.get("", response_model=DocumentListResponse)
+def list_documents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    service: DocumentService = Depends(),
+) -> DocumentListResponse:
+    return service.list_documents(page=page, page_size=page_size)
+
+
+@document_router.get("/{document_id}", response_model=DocumentDetailResponse)
+def get_document(
+    document_id: UUID,
+    service: DocumentService = Depends(),
+) -> DocumentDetailResponse:
+    return service.get_document(document_id)
+
+
+@document_router.patch("/{document_id}", response_model=DocumentDetailResponse)
+def update_document(
+    document_id: UUID,
+    payload: DocumentUpdateRequest,
+    service: DocumentService = Depends(),
+) -> DocumentDetailResponse:
+    return service.update_document(document_id, payload)
+
+
+@document_router.delete("/{document_id}", response_model=DocumentDeleteResponse)
+def delete_document(
+    document_id: UUID,
+    service: DocumentService = Depends(),
+) -> DocumentDeleteResponse:
+    return service.delete_document(document_id)
+
+
+@document_router.get(
+    "/{document_id}/versions", response_model=DocumentVersionListResponse
+)
+def list_document_versions(
+    document_id: UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    service: DocumentService = Depends(),
+) -> DocumentVersionListResponse:
+    return service.list_versions(
+        document_id=document_id, page=page, page_size=page_size
+    )
+
+
+@document_router.get(
+    "/{document_id}/versions/{version_id}",
+    response_model=DocumentVersionDetailResponse,
+)
+def get_document_version(
+    document_id: UUID,
+    version_id: UUID,
+    service: DocumentService = Depends(),
+) -> DocumentVersionDetailResponse:
+    return service.get_version(document_id, version_id)
+
+
+@document_router.patch(
+    "/{document_id}/versions/{version_id}",
+    response_model=DocumentVersionDetailResponse,
+)
+def update_document_version(
+    document_id: UUID,
+    version_id: UUID,
+    payload: DocumentVersionUpdateRequest,
+    service: DocumentService = Depends(),
+) -> DocumentVersionDetailResponse:
+    return service.update_version(document_id, version_id, payload)
+
+
+@document_router.delete(
+    "/{document_id}/versions/{version_id}",
+    response_model=DocumentVersionDeleteResponse,
+)
+def delete_document_version(
+    document_id: UUID,
+    version_id: UUID,
+    service: DocumentService = Depends(),
+) -> DocumentVersionDeleteResponse:
+    return service.delete_version(document_id, version_id)
+
+
+@document_router.get("/{document_id}/jobs/stream")
+async def stream_document_jobs(
+    document_id: UUID,
+    service: DocumentService = Depends(),
+):
+    return StreamingResponse(
+        service.stream_document_jobs(document_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )

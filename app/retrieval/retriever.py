@@ -28,6 +28,7 @@ class Retriever:
                     "score": r.score,
                     "id": r.id,
                     "chunk_id": payload.get("chunk_id"),
+                    "document_id": payload.get("document_id"),
                     "title": payload.get("title"),
                     "section_path": payload.get("section_path"),
                     "text": payload.get("text"),
