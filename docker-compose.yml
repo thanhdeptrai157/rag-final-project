@@ -1,12 +1,19 @@
-# version: "3.9"
+services:
+  backend:
+    build: .
+    container_name: rag-backend
+    restart: always
+    env_file:
+      - .env
+    environment:
+      HF_HOME: /app/.cache/huggingface
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_cache:/app/.cache/huggingface
 
-
-# services: 
-#   qdrant:
-#     image: qdrant/qdrant:latest
-#     container_name: qdrant_rag
-#     ports:
-#       - "6333:6333"
-#     volumes:
-#       - ./docker/qdrant/data:/qdrant/storage
-
+volumes:
+  hf_cache:

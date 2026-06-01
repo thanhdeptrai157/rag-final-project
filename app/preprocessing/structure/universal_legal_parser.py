@@ -45,7 +45,7 @@ class UniversalLegalParser:
 
     ARTICLE_RE = re.compile(
         r"^\s*(?:điều|dieu)\s+(\d+[a-zA-Z]?)\s*[.:]?\s*(.*)$",
-        re.I,llm
+        re.I,
     )
 
     ROMAN_HEADING_RE = re.compile(
