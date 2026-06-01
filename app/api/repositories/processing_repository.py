@@ -21,9 +21,17 @@ class ProcessingJobRepository:
         self.db = db
 
     def create_ingest_job(self, document_id: uuid.UUID) -> ProcessingJob:
-        """Tạo 1 job ingest duy nhất cho document."""
+        return self.create_ingest_job_for_version(
+            document_id=document_id, version_id=None
+        )
+
+    def create_ingest_job_for_version(
+        self, document_id: uuid.UUID, version_id: uuid.UUID | None
+    ) -> ProcessingJob:
+        """Tạo job ingest cho document/version."""
         job = ProcessingJob(
             document_id=document_id,
+            version_id=version_id,
             job_type="ingest",
             status="pending",
             retry_count=0,
@@ -34,7 +42,10 @@ class ProcessingJobRepository:
         return job
 
     def get_pending_jobs(
-        self, document_id: uuid.UUID = None, limit: int = 10
+        self,
+        document_id: uuid.UUID = None,
+        version_id: uuid.UUID = None,
+        limit: int = 10,
     ) -> List[ProcessingJob]:
         """Lấy danh sách job pending để worker xử lý.
 
@@ -49,6 +60,8 @@ class ProcessingJobRepository:
         )
         if document_id:
             query = query.filter(ProcessingJob.document_id == document_id)
+        if version_id:
+            query = query.filter(ProcessingJob.version_id == version_id)
         return query.limit(limit).all()
 
     def get_jobs_by_document(self, document_id: uuid.UUID) -> List[ProcessingJob]:
@@ -122,6 +135,11 @@ class DocumentVersionRepository:
         self,
         document_id: uuid.UUID,
         version_no: int,
+        previous_version_id: Optional[uuid.UUID] = None,
+        source_file_path: Optional[str] = None,
+        source_mime_type: Optional[str] = None,
+        source_checksum: Optional[str] = None,
+        status: str = "pending",
         raw_text_path: Optional[str] = None,
         cleaned_text_path: Optional[str] = None,
         checksum: Optional[str] = None,
@@ -130,6 +148,11 @@ class DocumentVersionRepository:
         version = DocumentVersion(
             document_id=document_id,
             version_no=version_no,
+            previous_version_id=previous_version_id,
+            source_file_path=source_file_path,
+            source_mime_type=source_mime_type,
+            source_checksum=source_checksum,
+            status=status,
             raw_text_path=raw_text_path,
             cleaned_text_path=cleaned_text_path,
             checksum=checksum,

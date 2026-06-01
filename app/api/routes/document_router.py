@@ -9,6 +9,7 @@ from app.schemas.document import (
     DocumentListResponse,
     DocumentUpdateRequest,
     DocumentUploadResponse,
+    DocumentVersionUploadResponse,
     DocumentVersionDeleteResponse,
     DocumentVersionDetailResponse,
     DocumentVersionListResponse,
@@ -29,6 +30,19 @@ async def upload_document(
     service: DocumentService = Depends(),
 ) -> DocumentUploadResponse:
     return await service.create_document(file)
+
+
+@document_router.post(
+    "/{document_id}/versions/upload",
+    response_model=DocumentVersionUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_document_version(
+    document_id: UUID,
+    file: UploadFile = File(...),
+    service: DocumentService = Depends(),
+) -> DocumentVersionUploadResponse:
+    return await service.upload_document_version(document_id, file)
 
 
 @document_router.get("", response_model=DocumentListResponse)

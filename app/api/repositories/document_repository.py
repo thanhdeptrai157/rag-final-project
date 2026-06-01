@@ -29,18 +29,14 @@ class DocumentRepository:
         self,
         *,
         title: str,
-        source_path: str,
         source_type: str,
-        file_path: str,
         mime_type: str | None,
         status: str,
         checksum: str,
     ) -> Document:
         document = Document(
             title=title,
-            source_path=source_path,
             source_type=source_type,
-            file_path=file_path,
             mime_type=mime_type,
             status=status,
             checksum=checksum,

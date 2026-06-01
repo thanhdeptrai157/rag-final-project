@@ -45,6 +45,12 @@ class ProcessingJob(Base, BaseModel):
         nullable=False,
         index=True,
     )
+    version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_versions.version_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     job_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     status: Mapped[str] = mapped_column(

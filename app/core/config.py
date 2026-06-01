@@ -20,6 +20,9 @@ class Config:
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 150))
 
     DATABASE_URL = os.getenv("DATABASE_URL")
+    DATABASE_POOL_RECYCLE_SECONDS = int(
+        os.getenv("DATABASE_POOL_RECYCLE_SECONDS", "1800")
+    )
 
     # Tesseract OCR path (Windows/Linux/Mac)
     TESSERACT_CMD = os.getenv("TESSERACT_CMD")

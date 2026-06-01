@@ -29,6 +29,16 @@ class DocumentVersion(Base, BaseModel):
         index=True,
     )
     version_no: Mapped[int] = mapped_column(nullable=False)
+    previous_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_versions.version_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_checksum: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     raw_text_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     cleaned_text_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)

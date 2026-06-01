@@ -12,12 +12,19 @@ class Document(BaseModel):
     title: str
     raw_text: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    version_id: str | None = None
+    version_no: int | None = None
+    previous_version_id: str | None = None
+    previous_version_number: int | None = None
 
 
 class DocumentUploadResponse(BaseModel):
     document_id: UUID
+    version_id: UUID
+    version_no: int
     title: str
     file_path: str | None
+    preview_url: str | None = None
     mime_type: str | None
     checksum: str | None
     status: str
@@ -25,11 +32,24 @@ class DocumentUploadResponse(BaseModel):
     job_id: str  # ID của processing job để track progress
 
 
+class DocumentVersionUploadResponse(BaseModel):
+    document_id: UUID
+    version_id: UUID
+    version_no: int
+    previous_version_id: UUID | None = None
+    title: str
+    file_path: str | None
+    preview_url: str | None = None
+    mime_type: str | None
+    checksum: str | None
+    status: str
+    created_at: datetime
+    job_id: str
+
+
 class DocumentUpdateRequest(BaseModel):
     title: str | None = None
-    source_path: str | None = None
     source_type: str | None = None
-    file_path: str | None = None
     mime_type: str | None = None
     status: str | None = None
     checksum: str | None = None
@@ -41,6 +61,7 @@ class DocumentListItem(BaseModel):
     source_path: str
     source_type: str
     file_path: str | None
+    preview_url: str | None = None
     mime_type: str | None
     status: str
     checksum: str | None
@@ -54,6 +75,11 @@ class DocumentVersionListItem(BaseModel):
     version_id: UUID
     document_id: UUID
     version_no: int
+    previous_version_id: UUID | None = None
+    source_file_path: str | None = None
+    source_mime_type: str | None = None
+    source_checksum: str | None = None
+    status: str
     raw_text_path: str | None
     cleaned_text_path: str | None
     checksum: str | None

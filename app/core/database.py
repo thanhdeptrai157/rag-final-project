@@ -11,6 +11,7 @@ class Base(DeclarativeBase):
 engine = create_engine(
     Config.DATABASE_URL,
     pool_pre_ping=True,
+    pool_recycle=Config.DATABASE_POOL_RECYCLE_SECONDS,
 )
 
 SessionLocal = sessionmaker(

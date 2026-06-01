@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import CheckConstraint, String, Text
+from sqlalchemy import CheckConstraint, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,9 +31,7 @@ class Document(Base, BaseModel):
         default=uuid.uuid4,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    source_path: Mapped[str] = mapped_column(Text, nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="uploaded")
     checksum: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)

@@ -1,6 +1,5 @@
 from pathlib import Path
 from typing import Any
-
 import fitz
 import pytesseract
 from PIL import Image, ImageFilter, ImageOps
@@ -8,7 +7,7 @@ from PIL import Image, ImageFilter, ImageOps
 from app.schemas.document import Document
 from app.core.config import Config
 
-# Set Tesseract path từ config (nếu không set thì dùng system PATH)
+
 if Config.TESSERACT_CMD:
     pytesseract.pytesseract.tesseract_cmd = Config.TESSERACT_CMD
 

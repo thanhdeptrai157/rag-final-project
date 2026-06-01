@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from sentence_transformers import SentenceTransformer
 from typing import List
 
-class Embbedder: 
-    def __init__(self, model_name: str= "BAAI/bge-m3"):
+
+class Embbedder:
+    def __init__(self, model_name: str = "BAAI/bge-m3"):
         self.model = SentenceTransformer(model_name)
-        
+
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
-        if not texts: 
+        if not texts:
             return []
         embeddings = self.model.encode(
             texts,
@@ -16,14 +18,17 @@ class Embbedder:
             show_progress_bar=True,
         )
         return embeddings.tolist()
-    
+
     def embed_query(self, query: str) -> List[float]:
         embedding = self.model.encode(
             [query],
             normalize_embeddings=True,
             show_progress_bar=False,
         )
-        
+
         return embedding[0].tolist()
-    
-    
+
+
+@lru_cache(maxsize=1)
+def get_embedder(model_name: str = "BAAI/bge-m3") -> Embbedder:
+    return Embbedder(model_name=model_name)

@@ -13,6 +13,7 @@ from app.api.repositories.processing_repository import (
 )
 from app.core.database import SessionLocal
 from app.models.document import Document
+from app.workers.background_worker import get_worker
 from app.schemas.document import (
     DocumentDeleteResponse,
     DocumentDetailResponse,
@@ -21,6 +22,7 @@ from app.schemas.document import (
     DocumentListResponse,
     DocumentUpdateRequest,
     DocumentUploadResponse,
+    DocumentVersionUploadResponse,
     DocumentVersionDeleteResponse,
     DocumentVersionDetailResponse,
     DocumentVersionListItem,
@@ -29,7 +31,6 @@ from app.schemas.document import (
 )
 from app.services.storage.r2_storage import R2Storage
 from app.utils.file_utils import build_r2_object_key, sha256_bytes
-from app.workers.background_worker import get_worker
 
 ALLOWED_MIME_TYPES = {
     "application/pdf",
@@ -58,46 +59,111 @@ class DocumentService:
         self._validate_upload(file=file, contents=contents)
 
         checksum = sha256_bytes(contents)
-        existing = self.repo.get_by_checksum(checksum)
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": "File already exists.",
-                    "document_id": str(existing.document_id),
-                },
-            )
-
         object_key = build_r2_object_key(file.filename)
-        self.storage.upload_bytes(
-            data=contents,
-            object_key=object_key,
-            content_type=file.content_type,
-        )
+        self.storage.upload_bytes(contents, object_key, file.content_type or "")
 
         document = self.repo.create(
             title=Path(file.filename).name,
-            source_path=Path(file.filename).name,
             source_type="upload",
-            file_path=object_key,
             mime_type=file.content_type,
-            status="uploaded",
+            status="processing",
             checksum=checksum,
         )
+        version = self.version_repo.create_version(
+            document_id=document.document_id,
+            version_no=1,
+            previous_version_id=None,
+            source_file_path=object_key,
+            source_mime_type=file.content_type,
+            source_checksum=checksum,
+            status="pending",
+        )
+        job = self.job_repo.create_ingest_job_for_version(
+            document_id=document.document_id,
+            version_id=version.version_id,
+        )
 
-        # ===== Tạo processing job + enqueue worker =====
-        job = self.job_repo.create_ingest_job(document.document_id)
-        worker = get_worker()
-        worker.enqueue_document(document.document_id)
+        get_worker().enqueue_document_version(
+            document_id=document.document_id,
+            version_id=version.version_id,
+        )
+
+        self.repo.db.refresh(version)
+        self.repo.db.refresh(document)
+
+        preview_url = None
+        if object_key:
+            preview_url = self.storage.generate_presigned_url(object_key)
 
         return DocumentUploadResponse(
             document_id=document.document_id,
+            version_id=version.version_id,
+            version_no=version.version_no,
             title=document.title,
-            file_path=document.file_path,
+            file_path=version.source_file_path,
+            preview_url=preview_url,
             mime_type=document.mime_type,
             checksum=document.checksum,
             status=document.status,
             created_at=document.created_at,
+            job_id=str(job.job_id),
+        )
+
+    async def upload_document_version(
+        self, document_id: UUID, file: UploadFile
+    ) -> DocumentVersionUploadResponse:
+        contents = await file.read()
+        self._validate_upload(file=file, contents=contents)
+
+        checksum = sha256_bytes(contents)
+        document = self._require_document(document_id)
+        latest_version = self.version_repo.get_latest_version(document_id)
+        next_version_no = (latest_version.version_no + 1) if latest_version else 1
+        previous_version_id = latest_version.version_id if latest_version else None
+
+        object_key = build_r2_object_key(file.filename)
+        self.storage.upload_bytes(contents, object_key, file.content_type or "")
+
+        version = self.version_repo.create_version(
+            document_id=document_id,
+            version_no=next_version_no,
+            previous_version_id=previous_version_id,
+            source_file_path=object_key,
+            source_mime_type=file.content_type,
+            source_checksum=checksum,
+            status="pending",
+        )
+        job = self.job_repo.create_ingest_job_for_version(
+            document_id=document_id,
+            version_id=version.version_id,
+        )
+
+        get_worker().enqueue_document_version(
+            document_id=document_id,
+            version_id=version.version_id,
+        )
+
+        self.repo.update(document, status="processing")
+
+        self.repo.db.refresh(version)
+        self.repo.db.refresh(document)
+
+        preview_url = None
+        if object_key:
+            preview_url = self.storage.generate_presigned_url(object_key)
+
+        return DocumentVersionUploadResponse(
+            document_id=document_id,
+            version_id=version.version_id,
+            version_no=version.version_no,
+            previous_version_id=version.previous_version_id,
+            title=document.title,
+            file_path=version.source_file_path,
+            preview_url=preview_url,
+            mime_type=version.source_mime_type,
+            checksum=version.source_checksum,
+            status=version.status,
+            created_at=version.created_at,
             job_id=str(job.job_id),
         )
 
@@ -281,12 +347,26 @@ class DocumentService:
         return version
 
     def _to_document_list_item(self, document: Document) -> DocumentListItem:
+        preview_url = None
+        source_path = document.title
+        file_path = None
+        try:
+            latest_version = self.version_repo.get_latest_version(document.document_id)
+            if latest_version:
+                source_path = latest_version.source_file_path or source_path
+                file_path = latest_version.source_file_path
+                if file_path:
+                    preview_url = self.storage.generate_presigned_url(file_path)
+        except Exception:
+            preview_url = None
+
         return DocumentListItem(
             document_id=document.document_id,
             title=document.title,
-            source_path=document.source_path,
+            source_path=source_path,
             source_type=document.source_type,
-            file_path=document.file_path,
+            file_path=file_path,
+            preview_url=preview_url,
             mime_type=document.mime_type,
             status=document.status,
             checksum=document.checksum,
@@ -301,6 +381,11 @@ class DocumentService:
             version_id=version.version_id,
             document_id=version.document_id,
             version_no=version.version_no,
+            previous_version_id=version.previous_version_id,
+            source_file_path=version.source_file_path,
+            source_mime_type=version.source_mime_type,
+            source_checksum=version.source_checksum,
+            status=version.status,
             raw_text_path=version.raw_text_path,
             cleaned_text_path=version.cleaned_text_path,
             checksum=version.checksum,
@@ -313,6 +398,7 @@ class DocumentService:
         return {
             "job_id": str(job.job_id),
             "document_id": str(job.document_id),
+            "version_id": str(job.version_id) if job.version_id else None,
             "job_type": job.job_type,
             "status": job.status,
             "started_at": job.started_at.isoformat() if job.started_at else None,
@@ -324,12 +410,18 @@ class DocumentService:
         }
 
     def _delete_document_storage(self, document: Document) -> None:
-        keys = [document.file_path]
         versions = self.version_repo.list_versions(
             document.document_id, page=1, page_size=1000
         )[0]
+        keys = []
         for version in versions:
-            keys.extend([version.raw_text_path, version.cleaned_text_path])
+            keys.extend(
+                [
+                    version.source_file_path,
+                    version.raw_text_path,
+                    version.cleaned_text_path,
+                ]
+            )
 
         for key in keys:
             if not key:
@@ -340,7 +432,11 @@ class DocumentService:
                 continue
 
     def _delete_version_storage(self, version) -> None:
-        for key in [version.raw_text_path, version.cleaned_text_path]:
+        for key in [
+            version.source_file_path,
+            version.raw_text_path,
+            version.cleaned_text_path,
+        ]:
             if not key:
                 continue
             try:

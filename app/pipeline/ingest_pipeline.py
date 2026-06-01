@@ -1,52 +1,35 @@
-"""
-Ingest Pipeline: Orchestrator chính để xử lý OCR, clean, chunk, embed, upsert Qdrant.
+# app/pipelines/ingest_pipeline.py
 
-Flow:
-1. Download file từ R2
-2. OCR + clean text
-3. Tạo document version
-4. Chunk text
-5. Insert chunks vào Postgres
-6. Embed chunks
-7. Upsert Qdrant
-8. Update chunk embedding_id
-9. Update document status = processed
-"""
-
-import uuid
+import hashlib
 import tempfile
+import uuid
 from pathlib import Path
 from typing import List
-import hashlib
 
-from sqlalchemy.orm import Session
-
-from app.loaders.pdf_loader import PDFLoader
-from app.preprocessing.cleaners.text_cleaner import TextCleaner
-from app.preprocessing.structure.regulation_parser import RegulationParser
-from app.chunking.regulation_chunker import RegulationChunker
-from app.embedding.sentence_transformer_embedder import Embbedder
-from app.retrieval.indexing_service import chunk_to_payload, prepare_text_for_embedding
-from app.vectordb.qdrant_store import QdrantStore
-from app.services.storage.r2_storage import R2Storage
-from app.models.document import Document
-from app.schemas.document import Document as DocumentSchema
 from app.api.repositories.processing_repository import (
-    DocumentVersionRepository,
     ChunkRepository,
+    DocumentVersionRepository,
 )
-from app.core.database import SessionLocal
+from app.chunking.universal_document_chunker import UniversalLegalChunker
 from app.core.config import Config
+from app.core.database import SessionLocal
+from app.embedding.sentence_transformer_embedder import get_embedder
+from app.loaders.pdf_loader_paddle_ocr import PDFLoader
+from app.models.document import Document
+from app.models.document_version import DocumentVersion
+from app.preprocessing.cleaners.text_cleaner import TextCleaner
+from app.retrieval.indexing_service import chunk_to_payload, prepare_text_for_embedding
+from app.schemas.document import Document as DocumentSchema
+from app.services.storage.r2_storage import R2Storage
+from app.vectordb.qdrant_store import QdrantStore
 
 
 class IngestPipeline:
-    """Orchestrator chính cho ingest end-to-end."""
-
     def __init__(self):
         self.pdf_loader = PDFLoader(enable_ocr=True, force_ocr=True)
         self.text_cleaner = TextCleaner()
-        self.chunker = RegulationChunker()
-        self.embedder = Embbedder(model_name="BAAI/bge-m3")
+        self.chunker = UniversalLegalChunker()
+        self.embedder = get_embedder()
         self.storage = R2Storage()
         self.qdrant_store = QdrantStore(
             collection_name=Config.QDRANT_COLLECTION,
@@ -54,171 +37,174 @@ class IngestPipeline:
             api_key=Config.QDRANT_API_KEY,
         )
 
-    def ingest(self, document_id: uuid.UUID, db: Session) -> dict:
-        """
-        Xử lý ingest toàn bộ cho 1 document.
-
-        Returns:
-            {
-                'success': bool,
-                'message': str,
-                'version_id': uuid.UUID | None,
-                'chunk_count': int,
-            }
-        """
+    def ingest(self, version_id) -> dict:
+        context = None
         try:
-            # Lấy document từ DB
-            doc_model = (
-                db.query(Document).filter(Document.document_id == document_id).first()
+            context = self._load_ingest_context(version_id)
+            self._update_version_and_document_status(
+                version_id=context["version_id"],
+                document_id=context["document_id"],
+                version_status="processing",
+                document_status="processing",
             )
-            if not doc_model:
-                raise ValueError(f"Document {document_id} not found")
 
-            print(f"[INGEST] Starting ingest for document {document_id}")
+            print(f"[INGEST] Starting ingest for version {version_id}")
+            print(f"[STEP 1] Downloading file from R2: {context['source_file_path']}")
+            file_bytes = self.storage.download_bytes(context["source_file_path"])
 
-            # ===== STEP 1: Download file từ R2 =====
-            print(f"[STEP 1] Downloading file from R2: {doc_model.file_path}")
-            file_bytes = self.storage.download_bytes(doc_model.file_path)
-
-            # ===== STEP 2: Tạo temp file để OCR =====
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
                 tmp_file.write(file_bytes)
                 tmp_file_path = tmp_file.name
 
             try:
-                # ===== STEP 3: OCR + clean text =====
-                print(f"[STEP 2] OCR PDF")
+                print("[STEP 2] OCR PDF")
                 doc_schema = self.pdf_loader.load(tmp_file_path)
                 raw_text = doc_schema.raw_text
-                print(f"[STEP 3] raw text: {(raw_text)}")
-                print(f"[STEP 3] Cleaning text")
+
+                print("[STEP 3] Cleaning text")
                 cleaned_text = self.text_cleaner.clean(raw_text)
 
-                # ===== STEP 4: Tạo document version =====
-                print(f"[STEP 4] Creating document version")
-                version_repo = DocumentVersionRepository(db)
-
-                # Tính checksum của cleaned text
+                print("[STEP 4] Updating version artifacts")
                 text_checksum = hashlib.sha256(cleaned_text.encode()).hexdigest()
 
-                # Upload raw/cleaned text lên R2
                 raw_text_key = self._upload_text_to_r2(
-                    document_id, "raw_text", raw_text
+                    context["document_id"], "raw_text", raw_text
                 )
                 cleaned_text_key = self._upload_text_to_r2(
-                    document_id, "cleaned_text", cleaned_text
+                    context["document_id"], "cleaned_text", cleaned_text
                 )
 
-                version = version_repo.create_version(
-                    document_id=document_id,
-                    version_no=1,  # Có thể update nếu có version cũ
-                    raw_text_path=raw_text_key,
-                    cleaned_text_path=cleaned_text_key,
-                    checksum=text_checksum,
+                previous_version = self._load_previous_version_context(
+                    context["previous_version_id"]
                 )
-                print(f"[STEP 4] Version created: {version.version_id}")
 
-                # ===== STEP 5: Chunk text =====
-                print(f"[STEP 5] Chunking text")
-                # Tạo schema Document từ dữ liệu để dùng cho chunker
+                print("[STEP 5] Chunking text")
                 doc_for_chunking = DocumentSchema(
-                    doc_id=str(document_id),
-                    source_path=doc_model.source_path,
-                    source_type=doc_model.source_type or "upload",
-                    title=doc_model.title,
+                    doc_id=str(context["document_id"]),
+                    source_path=context["source_file_path"],
+                    source_type=context["source_type"],
+                    title=context["title"],
                     raw_text=cleaned_text,
                     metadata=doc_schema.metadata or {},
+                    version_id=str(context["version_id"]),
+                    version_no=context["version_no"],
+                    previous_version_id=(
+                        str(previous_version["version_id"])
+                        if previous_version
+                        else None
+                    ),
+                    previous_version_number=(
+                        previous_version["version_no"] if previous_version else None
+                    ),
                 )
-                chunks_schema = self.chunker.chunk(doc_for_chunking)
+
+                chunker = self.chunker
+                print(f"[STEP 5] Selected chunker: {chunker.__class__.__name__}")
+
+                chunks_schema = chunker.chunk(doc_for_chunking)
                 print(f"[STEP 5] Created {len(chunks_schema)} chunks")
 
                 if not chunks_schema:
                     raise ValueError("No chunks created from document")
 
-                # ===== STEP 6: Insert chunks vào Postgres =====
-                print(f"[STEP 6] Inserting chunks to Postgres")
-                chunk_repo = ChunkRepository(db)
+                if previous_version:
+                    previous_chunks = self._load_chunks_by_version(
+                        previous_version["version_id"]
+                    )
+                    self._annotate_chunks_with_previous_version(
+                        chunks_schema=chunks_schema,
+                        previous_version=previous_version,
+                        previous_chunks=previous_chunks,
+                    )
+
+                print("[STEP 6] Inserting chunks to Postgres")
                 chunk_data = [
                     {
                         "chunk_index": chunk.chunk_index,
                         "chunk_text": chunk.text,
-                        "token_count": None,  # Có thể tính sau
+                        "token_count": None,
                         "page_number": None,
                         "section_path": chunk.section_path,
                         "metadata_json": chunk.metadata,
                     }
                     for chunk in chunks_schema
                 ]
-                chunks_db = chunk_repo.create_chunks(
-                    document_id=document_id,
-                    version_id=version.version_id,
+                chunk_ids = self._create_chunks(
+                    document_id=context["document_id"],
+                    version_id=context["version_id"],
                     chunk_data=chunk_data,
                 )
-                print(f"[STEP 6] Inserted {len(chunks_db)} chunks to DB")
+                point_ids = [str(chunk_id) for chunk_id in chunk_ids]
 
-                # ===== STEP 7: Embed chunks =====
-                print(f"[STEP 7] Embedding chunks")
+                print("[STEP 7] Embedding chunks")
                 texts_to_embed = [
                     prepare_text_for_embedding(chunk) for chunk in chunks_schema
                 ]
                 vectors = self.embedder.embed_texts(texts_to_embed)
-                print(f"[STEP 7] Generated {len(vectors)} embeddings")
 
-                # ===== STEP 8: Ensure Qdrant collection exists =====
-                print(f"[STEP 8a] Checking Qdrant collection")
+                print("[STEP 8a] Checking Qdrant collection")
                 vector_size = len(vectors[0]) if vectors else 1024
                 self.qdrant_store.ensure_collection_exists(vector_size=vector_size)
 
-                # ===== STEP 8: Upsert Qdrant =====
-                print(f"[STEP 8b] Upserting to Qdrant")
+                print("[STEP 8b] Upserting to Qdrant")
                 payloads = [chunk_to_payload(chunk) for chunk in chunks_schema]
-                point_ids = [str(chunk.chunk_id) for chunk in chunks_db]
-
                 self.qdrant_store.upsert_chunks(
                     ids=point_ids,
                     vectors=vectors,
                     payloads=payloads,
                     batch_size=100,
                 )
-                print(f"[STEP 8] Upserted {len(vectors)} points to Qdrant")
 
-                # ===== STEP 9: Update chunk embedding_id =====
-                print(f"[STEP 9] Updating chunk embedding IDs")
-                chunk_ids = [chunk.chunk_id for chunk in chunks_db]
-                chunk_repo.update_embedding_ids(chunk_ids, point_ids)
+                print("[STEP 9] Updating chunk embedding IDs")
+                self._update_embedding_ids(chunk_ids, point_ids)
 
-                # ===== STEP 10: Update document status =====
-                print(f"[STEP 10] Updating document status to processed")
-                doc_model.status = "processed"
-                db.commit()
+                print("[STEP 10] Updating version/document status to processed")
+                self._update_version_and_document_status(
+                    version_id=context["version_id"],
+                    document_id=context["document_id"],
+                    version_status="processed",
+                    document_status="processed",
+                    raw_text_path=raw_text_key,
+                    cleaned_text_path=cleaned_text_key,
+                    checksum=text_checksum,
+                )
 
-                print(f"[INGEST] ✓ Completed for document {document_id}")
                 return {
                     "success": True,
-                    "message": f"Ingest completed: {len(chunks_db)} chunks processed",
-                    "version_id": version.version_id,
-                    "chunk_count": len(chunks_db),
+                    "message": f"Ingest completed: {len(chunk_ids)} chunks processed",
+                    "version_id": context["version_id"],
+                    "chunk_count": len(chunk_ids),
                 }
 
             finally:
-                # Xóa temp file
                 Path(tmp_file_path).unlink(missing_ok=True)
 
         except Exception as e:
-            print(f"[INGEST] ✗ Error: {str(e)}")
-            doc_model.status = "failed"
-            db.commit()
+            print(f"[INGEST] Error: {str(e)}")
+            try:
+                if context:
+                    self._update_version_and_document_status(
+                        version_id=context["version_id"],
+                        document_id=context["document_id"],
+                        version_status="failed",
+                        document_status="failed",
+                    )
+            except Exception:
+                pass
+
             raise
 
     def _upload_text_to_r2(
         self, document_id: uuid.UUID, text_type: str, content: str
     ) -> str:
-        """Upload text (raw/cleaned) lên R2."""
         from datetime import datetime, timezone
         import uuid as uuid_module
 
         now = datetime.now(timezone.utc)
-        key = f"documents/text/{now.year}/{now.month:02d}/{document_id}/{text_type}/{uuid_module.uuid4()}.txt"
+        key = (
+            f"documents/text/{now.year}/{now.month:02d}/"
+            f"{document_id}/{text_type}/{uuid_module.uuid4()}.txt"
+        )
 
         self.storage.upload_bytes(
             data=content.encode("utf-8"),
@@ -226,3 +212,163 @@ class IngestPipeline:
             content_type="text/plain; charset=utf-8",
         )
         return key
+
+    def _choose_chunker(self, text: str):
+        # Chunker detection removed: always use UniversalLegalChunker
+        return self.chunker
+
+    def _load_ingest_context(self, version_id) -> dict:
+        with SessionLocal() as db:
+            version = DocumentVersionRepository(db).get_by_id(version_id)
+            if not version:
+                raise ValueError(f"Version {version_id} not found")
+
+            document = (
+                db.query(Document)
+                .filter(Document.document_id == version.document_id)
+                .first()
+            )
+            if not document:
+                raise ValueError(f"Document {version.document_id} not found")
+
+            if not version.source_file_path:
+                raise ValueError(f"Version {version_id} does not have source_file_path")
+
+            return {
+                "version_id": version.version_id,
+                "document_id": version.document_id,
+                "version_no": version.version_no,
+                "previous_version_id": version.previous_version_id,
+                "source_file_path": version.source_file_path,
+                "title": document.title,
+                "source_type": document.source_type or "upload",
+            }
+
+    def _load_previous_version_context(self, previous_version_id) -> dict | None:
+        if not previous_version_id:
+            return None
+
+        with SessionLocal() as db:
+            version = DocumentVersionRepository(db).get_by_id(previous_version_id)
+            if not version:
+                return None
+
+            return {
+                "version_id": version.version_id,
+                "version_no": version.version_no,
+            }
+
+    def _load_chunks_by_version(self, version_id) -> list:
+        with SessionLocal() as db:
+            return ChunkRepository(db).get_chunks_by_version(version_id)
+
+    def _create_chunks(
+        self,
+        *,
+        document_id: uuid.UUID,
+        version_id: uuid.UUID,
+        chunk_data: List[dict],
+    ) -> List[uuid.UUID]:
+        with SessionLocal() as db:
+            chunks = ChunkRepository(db).create_chunks(
+                document_id=document_id,
+                version_id=version_id,
+                chunk_data=chunk_data,
+            )
+            return [chunk.chunk_id for chunk in chunks]
+
+    def _update_embedding_ids(
+        self, chunk_ids: List[uuid.UUID], embedding_ids: List[str]
+    ) -> None:
+        with SessionLocal() as db:
+            ChunkRepository(db).update_embedding_ids(chunk_ids, embedding_ids)
+
+    def _update_version_and_document_status(
+        self,
+        *,
+        version_id: uuid.UUID,
+        document_id: uuid.UUID,
+        version_status: str | None = None,
+        document_status: str | None = None,
+        raw_text_path: str | None = None,
+        cleaned_text_path: str | None = None,
+        checksum: str | None = None,
+    ) -> None:
+        with SessionLocal() as db:
+            version = (
+                db.query(DocumentVersion)
+                .filter(DocumentVersion.version_id == version_id)
+                .first()
+            )
+            if not version:
+                raise ValueError(f"Version {version_id} not found")
+
+            if version_status is not None:
+                version.status = version_status
+            if raw_text_path is not None:
+                version.raw_text_path = raw_text_path
+            if cleaned_text_path is not None:
+                version.cleaned_text_path = cleaned_text_path
+            if checksum is not None:
+                version.checksum = checksum
+
+            document = (
+                db.query(Document).filter(Document.document_id == document_id).first()
+            )
+            if document and document_status is not None:
+                document.status = document_status
+
+            db.commit()
+
+    def _annotate_chunks_with_previous_version(
+        self,
+        *,
+        chunks_schema: List,
+        previous_version,
+        previous_chunks,
+    ) -> None:
+        previous_by_article = {}
+
+        for chunk in previous_chunks:
+            metadata = chunk.metadata_json or {}
+            article_number = metadata.get("article_number") or metadata.get(
+                "target_article_number"
+            )
+            if article_number is not None:
+                previous_by_article[str(article_number)] = chunk
+
+        for chunk in chunks_schema:
+            metadata = chunk.metadata or {}
+            current_article = metadata.get("article_number") or metadata.get(
+                "target_article_number"
+            )
+            if current_article is None:
+                continue
+
+            previous_chunk = previous_by_article.get(str(current_article))
+
+            metadata["previous_version_id"] = str(previous_version["version_id"])
+            metadata["previous_version_number"] = previous_version["version_no"]
+
+            if not previous_chunk:
+                metadata["relation_to_previous_version"] = "new_article"
+                chunk.metadata = metadata
+                continue
+
+            previous_metadata = previous_chunk.metadata_json or {}
+            metadata["previous_chunk_id"] = str(previous_chunk.chunk_id)
+            metadata["previous_chunk_title"] = previous_chunk.chunk_text[:120]
+
+            if (
+                metadata.get("is_amendment")
+                or metadata.get("chunk_kind") == "amendment"
+            ):
+                metadata["relation_to_previous_version"] = "amends_article"
+            else:
+                metadata["relation_to_previous_version"] = "matched_article"
+
+            metadata["previous_article_number"] = previous_metadata.get(
+                "article_number"
+            ) or previous_metadata.get("target_article_number")
+
+            chunk.metadata = metadata

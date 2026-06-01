@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.embedding.sentence_transformer_embedder import get_embedder
 from app.workers.background_worker import (
     start_background_worker,
     stop_background_worker,
@@ -12,6 +13,7 @@ from .routers import router
 async def lifespan(app: FastAPI):
     """Khởi động/dừng background worker cùng với app lifecycle."""
     print("[APP] Starting up...")
+    get_embedder()
     start_background_worker()
     yield
     print("[APP] Shutting down...")

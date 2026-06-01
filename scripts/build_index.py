@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import uuid
 from app.chunking.regulation_chunker import RegulationChunker
 from app.embedding.sentence_transformer_embedder import Embbedder
-from app.loaders.pdf_loader import PDFLoader
+from app.loaders.pdf_loader_paddle_ocr import PDFLoader
 from app.preprocessing.cleaners.text_cleaner import TextCleaner
 from app.retrieval.indexing_service import chunk_to_payload, prepare_text_for_embedding
 from app.schemas.document import Document

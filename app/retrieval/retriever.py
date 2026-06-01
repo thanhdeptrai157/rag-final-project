@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import List, Dict, Any
 
-from app.embedding.sentence_transformer_embedder import Embbedder
+from app.embedding.sentence_transformer_embedder import get_embedder
 from app.vectordb.qdrant_store import QdrantStore
 from app.core.config import Config
 
 
 class Retriever:
     def __init__(self):
-        self.embedder = Embbedder(model_name="BAAI/bge-m3")
+        self.embedder = get_embedder()
         self.store = QdrantStore(
             collection_name=Config.QDRANT_COLLECTION,
             url=Config.QDRANT_HOST_URL,
