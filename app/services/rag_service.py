@@ -2,6 +2,7 @@ from uuid import UUID
 
 from app.core.database import SessionLocal
 from app.llm.gemini_client import GeminiClient
+from app.llm.ollama_client import OllamaClient
 from app.models.document import Document
 from app.models.chunk import Chunk as ChunkModel
 from app.models.document_version import DocumentVersion
@@ -12,11 +13,14 @@ from app.services.storage.r2_storage import R2Storage
 class RagService:
     def __init__(self):
         self.retriever = Retriever()
-        self.llm = GeminiClient()
+        # self.llm = GeminiClient()
+        self.llm = OllamaClient()
         self.storage = R2Storage()
 
     def answer_query(self, query: str, top_k: int = 1) -> dict:
+        print("Original query:", query)
         expanded_queries = self.llm.generate_expand_query(query=query)
+        print("Expanded queries:", expanded_queries)
         all_results = []
 
         for q in expanded_queries:

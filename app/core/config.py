@@ -26,3 +26,7 @@ class Config:
 
     # Tesseract OCR path (Windows/Linux/Mac)
     TESSERACT_CMD = os.getenv("TESSERACT_CMD")
+
+    OLLAMA_HOST = os.getenv("OLLAMA_HOST")
+    OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")

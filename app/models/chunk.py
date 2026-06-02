@@ -40,7 +40,7 @@ class Chunk(Base, BaseModel):
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    section_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    section_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     embedding_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True
