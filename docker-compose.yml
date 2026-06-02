@@ -10,6 +10,8 @@ services:
       TOKENIZERS_PARALLELISM: "false"
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     volumes:
