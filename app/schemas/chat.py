@@ -13,6 +13,10 @@ class SourceDocument(BaseModel):
     preview_url: str | None = None
     document_id: str | None = None
     mime_type: str | None = None
+    score: float | None = None
+    rerank_score: float | None = None
+    lexical_score: float | None = None
+    matched_query_count: int | None = None
 
 
 class ChatResponse(BaseModel):
