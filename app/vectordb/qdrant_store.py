@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import List, Dict, Any
+from typing import Any
+
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.http import models
 
 
 class QdrantStore:
@@ -10,16 +11,17 @@ class QdrantStore:
         self,
         collection_name: str,
         url: str,
-        api_key: str,
+        api_key: str | None = None,
+        timeout: int = 30,
     ):
         self.collection_name = collection_name
         self.client = QdrantClient(
             url=url,
-            api_key=api_key,
+            api_key=api_key or None,
+            timeout=timeout,
         )
 
     def collection_exists(self) -> bool:
-        """Kiểm tra collection có tồn tại không."""
         try:
             self.client.get_collection(self.collection_name)
             return True
@@ -27,56 +29,106 @@ class QdrantStore:
             return False
 
     def ensure_collection_exists(self, vector_size: int = 1024) -> None:
-        """Tạo collection nếu chưa tồn tại."""
         if not self.collection_exists():
             print(
-                f"[QDRANT] Creating collection: {self.collection_name} (vector_size={vector_size})"
+                f"[QDRANT] Creating collection: {self.collection_name} "
+                f"(vector_size={vector_size})"
             )
             self.recreate_collection(vector_size=vector_size)
         else:
             print(f"[QDRANT] Collection already exists: {self.collection_name}")
 
+        self.ensure_payload_indexes()
+
     def recreate_collection(self, vector_size: int) -> None:
         self.client.recreate_collection(
             collection_name=self.collection_name,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+            vectors_config=models.VectorParams(
+                size=vector_size,
+                distance=models.Distance.COSINE,
+            ),
         )
+
+        self.ensure_payload_indexes()
+
+    def ensure_payload_indexes(self) -> None:
+        indexes = {
+            "document_id": models.PayloadSchemaType.KEYWORD,
+            "chunk_id": models.PayloadSchemaType.KEYWORD,
+            "chunk_type": models.PayloadSchemaType.KEYWORD,
+            "metadata.document_id": models.PayloadSchemaType.KEYWORD,
+            "metadata.status": models.PayloadSchemaType.KEYWORD,
+            "metadata.is_current": models.PayloadSchemaType.BOOL,
+        }
+
+        for field_name, field_schema in indexes.items():
+            try:
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field_name,
+                    field_schema=field_schema,
+                    wait=True,
+                )
+                print(f"[QDRANT] Created payload index: {field_name}")
+            except Exception as e:
+                msg = str(e).lower()
+                if (
+                    "already exists" in msg
+                    or "already has" in msg
+                    or "index already exists" in msg
+                ):
+                    print(f"[QDRANT] Payload index already exists: {field_name}")
+                    continue
+
+                print(
+                    f"[QDRANT] Failed to create payload index "
+                    f"{field_name}: {type(e).__name__}: {e}"
+                )
+                raise
 
     def upsert_chunks(
         self,
-        ids: List[str],
-        vectors: List[List[float]],
-        payloads: List[Dict[str, Any]],
+        ids: list[str],
+        vectors: list[list[float]],
+        payloads: list[dict[str, Any]],
         batch_size: int = 100,
     ) -> None:
-        """Upsert chunks với batch để tránh timeout.
+        if not (len(ids) == len(vectors) == len(payloads)):
+            raise ValueError(
+                "ids, vectors, payloads must have the same length: "
+                f"{len(ids)}, {len(vectors)}, {len(payloads)}"
+            )
 
-        Args:
-            ids: List ID
-            vectors: List embedding vectors
-            payloads: List payload metadata
-            batch_size: Số lượng point mỗi batch (default 100)
-        """
         total = len(ids)
+
         for i in range(0, total, batch_size):
             batch_end = min(i + batch_size, total)
-            batch_ids = ids[i:batch_end]
-            batch_vectors = vectors[i:batch_end]
-            batch_payloads = payloads[i:batch_end]
 
             points = [
-                PointStruct(id=idx, vector=vector, payload=payload)
-                for idx, vector, payload in zip(
-                    batch_ids, batch_vectors, batch_payloads
+                models.PointStruct(
+                    id=str(point_id),
+                    vector=vector,
+                    payload=payload,
+                )
+                for point_id, vector, payload in zip(
+                    ids[i:batch_end],
+                    vectors[i:batch_end],
+                    payloads[i:batch_end],
                 )
             ]
 
             print(
-                f"[QDRANT] Upserting batch {i//batch_size + 1}: {len(points)} points ({batch_end}/{total})"
+                f"[QDRANT] Upserting batch {i // batch_size + 1}: "
+                f"{len(points)} points ({batch_end}/{total})"
             )
-            self.client.upsert(collection_name=self.collection_name, points=points)
 
-    def search(self, query_vector: List[float], top_k: int = 5):
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=points,
+                wait=True,
+            )
+
+    def search(self, query_vector: list[float], top_k: int = 5):
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
@@ -85,3 +137,53 @@ class QdrantStore:
             with_vectors=False,
         )
         return response.points
+
+    def _document_filter(self, document_id: str) -> models.Filter:
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=str(document_id)),
+                )
+            ]
+        )
+
+    def count_by_document_id(self, document_id: str) -> int:
+        result = self.client.count(
+            collection_name=self.collection_name,
+            count_filter=self._document_filter(document_id),
+            exact=True,
+        )
+        return result.count
+
+    def delete_by_document_id(self, document_id: str, wait: bool = True) -> None:
+        doc_id = str(document_id)
+        qfilter = self._document_filter(doc_id)
+
+        try:
+            self.ensure_payload_indexes()
+
+            before_count = self.count_by_document_id(doc_id)
+            print(f"[QDRANT] Found {before_count} points for document_id={doc_id}")
+
+            if before_count == 0:
+                print(f"[QDRANT] Nothing to delete for document_id={doc_id}")
+                return
+
+            result = self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=qfilter),
+                wait=wait,
+            )
+
+            print(f"[QDRANT] Delete result for document_id={doc_id}: {result}")
+
+            after_count = self.count_by_document_id(doc_id)
+            print(f"[QDRANT] Remaining points for document_id={doc_id}: {after_count}")
+
+        except Exception as e:
+            print(
+                f"[QDRANT] Delete failed document_id={doc_id}: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise

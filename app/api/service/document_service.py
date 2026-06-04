@@ -11,6 +11,7 @@ from app.api.repositories.processing_repository import (
     DocumentVersionRepository,
     ProcessingJobRepository,
 )
+from app.core.config import Config
 from app.core.database import SessionLocal
 from app.models.document import Document
 from app.workers.background_worker import get_worker
@@ -31,6 +32,7 @@ from app.schemas.document import (
 )
 from app.services.storage.r2_storage import R2Storage
 from app.utils.file_utils import build_r2_object_key, sha256_bytes
+from app.vectordb.qdrant_store import QdrantStore
 
 ALLOWED_MIME_TYPES = {
     "application/pdf",
@@ -53,6 +55,11 @@ class DocumentService:
         self.storage = storage
         self.job_repo = job_repo
         self.version_repo = version_repo
+        self.qdrant_store = QdrantStore(
+            collection_name=Config.QDRANT_COLLECTION,
+            url=Config.QDRANT_HOST_URL,
+            api_key=Config.QDRANT_API_KEY,
+        )
 
     async def create_document(self, file: UploadFile) -> DocumentUploadResponse:
         contents = await file.read()
@@ -222,6 +229,7 @@ class DocumentService:
 
     def delete_document(self, document_id: UUID) -> DocumentDeleteResponse:
         document = self._require_document(document_id)
+        self._delete_document_vectors(document_id)
         self._delete_document_storage(document)
         self.repo.delete(document)
         return DocumentDeleteResponse(document_id=document_id)
@@ -443,3 +451,12 @@ class DocumentService:
                 self.storage.delete_object(key)
             except Exception:
                 continue
+
+    def _delete_document_vectors(self, document_id: UUID) -> None:
+        try:
+            self.qdrant_store.delete_by_document_id(str(document_id))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to delete document chunks from Qdrant",
+            ) from exc
