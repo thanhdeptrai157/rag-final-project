@@ -17,6 +17,8 @@ class SourceDocument(BaseModel):
     rerank_score: float | None = None
     lexical_score: float | None = None
     matched_query_count: int | None = None
+    citation_id: int | None = None
+    context: str | None = None
 
 
 class ChatResponse(BaseModel):

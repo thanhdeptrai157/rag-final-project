@@ -59,7 +59,7 @@ class QueryPipeline:
             retrieved = self.retriever.retrieve(
                 q,
                 top_k=route.candidate_top_k,
-                filters=route.filters or None, 
+                filters=route.filters or None,
             )
 
             for item in retrieved:
@@ -77,10 +77,20 @@ class QueryPipeline:
         contexts = []
         sources = []
 
-        for item in results:
+        for i, item in enumerate(results, start=1):
             text = item.get("text")
             if text:
-                contexts.append(text)
+                title = item.get("title") or ""
+                section_path = item.get("section_path") or ""
+
+                contexts.append(f"""
+                [SOURCE {i}]
+                Title: {title}
+                Section: {section_path}
+
+                {text}
+                [/SOURCE {i}]
+                """.strip())
 
             metadata = item.get("metadata") or {}
             document_id = item.get("document_id")
@@ -109,9 +119,11 @@ class QueryPipeline:
 
             sources.append(
                 {
+                    "citation_id": i,
                     "title": item.get("title"),
                     "section_path": item.get("section_path"),
                     "source": metadata.get("source") or file_path or document_id,
+                    "context": text,
                     "file_path": file_path,
                     "preview_url": preview_url,
                     "document_id": str(document_id) if document_id else None,

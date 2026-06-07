@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
       - name: SSH Deploy
@@ -16,11 +17,29 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+
+          timeout: 120s
+          command_timeout: 90m
+
           script: |
+            set -euo pipefail
+
+            echo "=== Enter project ==="
             cd /opt/rag-chatbot/rag-final-project
 
+            echo "=== Update source ==="
             git pull origin main
 
+            echo "=== Clean old build cache ==="
+            docker builder prune -af || true
+
+            echo "=== Build & Deploy ==="
             docker compose up -d --build
 
-            docker image prune -f
+            echo "=== Clean dangling images ==="
+            docker image prune -af || true
+
+            echo "=== Clean build cache ==="
+            docker builder prune -af || true
+
+            echo "=== Done ==="
