@@ -4,6 +4,7 @@ from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
 
 class QdrantStore:
@@ -128,14 +129,36 @@ class QdrantStore:
                 wait=True,
             )
 
-    def search(self, query_vector: list[float], top_k: int = 5):
+    def search(
+        self,
+        query_vector: list[float],
+        top_k: int = 5,
+        filters: dict | None = None,
+    ):
+        query_filter = None
+
+        if filters:
+            conditions = []
+
+            for key, value in filters.items():
+                conditions.append(
+                    FieldCondition(
+                        key=f"metadata.{key}",
+                        match=MatchValue(value=value),
+                    )
+                )
+
+            query_filter = Filter(must=conditions)
+
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
             limit=top_k,
             with_payload=True,
             with_vectors=False,
+            query_filter=query_filter,
         )
+
         return response.points
 
     def _document_filter(self, document_id: str) -> models.Filter:

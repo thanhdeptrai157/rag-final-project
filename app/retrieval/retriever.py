@@ -16,9 +16,16 @@ class Retriever:
             api_key=Config.QDRANT_API_KEY,
         )
 
-    def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        filters: dict | None = None,
+    ) -> List[Dict[str, Any]]:
         query_vector = self.embedder.embed_query(query)
-        results = self.store.search(query_vector=query_vector, top_k=top_k)
+        results = self.store.search(
+            query_vector=query_vector, top_k=top_k, filters=filters
+        )
 
         output = []
         for r in results:

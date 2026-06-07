@@ -10,6 +10,7 @@ from app.llm.ollama_client import OllamaClient
 from app.models.document import Document
 from app.models.chunk import Chunk as ChunkModel
 from app.models.document_version import DocumentVersion
+from app.pipeline.query_pipeline import QueryPipeline
 from app.retrieval.retriever import Retriever
 from app.services.storage.r2_storage import R2Storage
 
@@ -20,85 +21,15 @@ class RagService:
         # self.llm = GeminiClient()
         self.llm = OllamaClient()
         self.storage = R2Storage()
+        self.query_pipeline = QueryPipeline(
+            retriever=self.retriever,
+            llm=self.llm,
+            storage=self.storage,
+            rag_helpers=self,
+        )
 
     def answer_query(self, query: str, top_k: int = 1) -> dict:
-        print("Original query:", query)
-        expanded_queries = self._normalize_expanded_queries(
-            query=query,
-            expanded_queries=self.llm.generate_expand_query(query=query),
-        )
-        print("Expanded queries:", expanded_queries)
-        all_results = []
-        candidate_top_k = max(top_k * 4, 12)
-
-        for query_index, q in enumerate(expanded_queries):
-            retrieved = self.retriever.retrieve(q, top_k=candidate_top_k)
-            for item in retrieved:
-                item["retrieval_query"] = q
-                item["retrieval_query_index"] = query_index
-            all_results.extend(retrieved)
-
-        results = self._rerank_results(
-            query=query,
-            expanded_queries=expanded_queries,
-            results=all_results,
-            top_k=top_k,
-        )
-        results = self._load_related_version_chunks(results)
-        documents_map = self._load_documents_map(results)
-        latest_version_map = self._load_latest_version_map(results)
-        contexts = []
-        sources = []
-        for item in results:
-            text = item.get("text")
-            if text:
-                contexts.append(text)
-
-            metadata = item.get("metadata") or {}
-            document_id = item.get("document_id")
-
-            document_model = (
-                documents_map.get(str(document_id)) if document_id else None
-            )
-            latest_version = (
-                latest_version_map.get(str(document_id)) if document_id else None
-            )
-            file_path = metadata.get("file_path") or (
-                latest_version.source_file_path if latest_version else None
-            )
-            mime_type = metadata.get("mime_type") or (
-                document_model.mime_type if document_model else None
-            )
-
-            source = metadata.get("source") or file_path or document_id
-
-            preview_url = None
-            if file_path:
-                try:
-                    preview_url = self.storage.generate_presigned_url(file_path)
-                except Exception:
-                    preview_url = None
-
-            sources.append(
-                {
-                    "title": item.get("title"),
-                    "section_path": item.get("section_path"),
-                    "source": source,
-                    "file_path": file_path,
-                    "preview_url": preview_url,
-                    "document_id": str(document_id) if document_id else None,
-                    "mime_type": mime_type,
-                    "score": item.get("score"),
-                    "rerank_score": item.get("rerank_score"),
-                    "lexical_score": item.get("lexical_score"),
-                    "matched_query_count": item.get("matched_query_count"),
-                }
-            )
-
-        context = "\n\n".join(contexts)
-        answer = self.llm.generate_response(query=query, context=context)
-
-        return {"answer": answer, "sources": sources}
+        return self.query_pipeline.run(query=query, top_k=top_k)
 
     def _normalize_expanded_queries(
         self, query: str, expanded_queries: list[str] | None

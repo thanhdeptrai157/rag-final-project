@@ -2,7 +2,11 @@ import json
 
 from google import genai
 from app.core.config import Config
-from app.llm.prompt_builder import build_expand_query_prompt, build_rag_prompt
+from app.llm.prompt_builder import (
+    build_expand_query_prompt,
+    build_rag_prompt,
+    build_route_query_prompt,
+)
 
 
 class GeminiClient:
@@ -44,3 +48,34 @@ class GeminiClient:
 
         except Exception:
             return [query]
+
+    def generate_query_route(self, query: str) -> dict:
+        prompt = build_route_query_prompt(query=query)
+
+        response = self.client.models.generate_content(
+            model="gemma-4-31b-it",
+            contents=prompt,
+            config={
+                "temperature": 0.1,
+                "response_mime_type": "application/json",
+            },
+        )
+
+        text = response.text.strip()
+        return self._parse_json_object(text)
+
+    def _parse_json_object(self, text: str) -> dict:
+        try:
+            route = json.loads(text)
+            return route if isinstance(route, dict) else {}
+        except Exception:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return {}
+
+            try:
+                route = json.loads(text[start : end + 1])
+                return route if isinstance(route, dict) else {}
+            except Exception:
+                return {}

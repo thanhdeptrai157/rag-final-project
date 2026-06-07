@@ -67,3 +67,36 @@ def build_expand_query_prompt(query: str) -> str:
     Câu hỏi cần mở rộng: {query}
     """
     return prompt.strip()
+
+
+def build_route_query_prompt(query: str) -> str:
+    prompt = f"""
+    Bạn là bộ định tuyến truy vấn cho hệ thống RAG tài liệu pháp quy/hành chính.
+    Nhiệm vụ: nhận diện intent truy vấn và trả về đúng một JSON object.
+
+    Các strategy hợp lệ:
+    - exact_legal_lookup: hỏi trực tiếp về điều/khoản/điểm hoặc một số điều cụ thể.
+    - appendix_lookup: hỏi về phụ lục, bảng, biểu mẫu, khung, quy đổi, danh mục, mẫu.
+    - amendment_lookup: hỏi về sửa đổi, bổ sung, bãi bỏ, thay thế, nội dung hiện hành, khác biệt giữa bản mới/cũ.
+    - broad_semantic_rag: câu hỏi nội dung tổng quát cần tìm kiếm ngữ nghĩa.
+    - low_context_or_invalid: câu quá ngắn, chào hỏi, không rõ nghĩa, hoặc không liên quan tài liệu.
+
+    Quy tắc:
+    1. Chỉ trả về JSON object, không markdown, không giải thích ngoài JSON.
+    2. Không trả lời câu hỏi của người dùng.
+    3. Nếu thấy số điều, điền article_number dạng chuỗi, ví dụ "12", "12a".
+    4. Nếu thấy phụ lục, điền appendix_number dạng chuỗi in hoa, ví dụ "I", "II", "3".
+    5. confidence nằm trong khoảng 0 đến 1.
+
+    Schema:
+    {{
+      "strategy": "exact_legal_lookup",
+      "article_number": null,
+      "appendix_number": null,
+      "confidence": 0.0,
+      "reason": "ngắn gọn"
+    }}
+
+    Câu hỏi: {query}
+    """
+    return prompt.strip()

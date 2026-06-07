@@ -3,7 +3,11 @@ import json
 from ollama import Client
 
 from app.core.config import Config
-from app.llm.prompt_builder import build_expand_query_prompt, build_rag_prompt
+from app.llm.prompt_builder import (
+    build_expand_query_prompt,
+    build_rag_prompt,
+    build_route_query_prompt,
+)
 
 
 class OllamaClient:
@@ -48,3 +52,25 @@ class OllamaClient:
 
         except Exception:
             return [query]
+
+    def generate_query_route(self, query: str) -> dict:
+        prompt = build_route_query_prompt(query=query)
+
+        text = self._chat(prompt, temperature=0.1).strip()
+        return self._parse_json_object(text)
+
+    def _parse_json_object(self, text: str) -> dict:
+        try:
+            route = json.loads(text)
+            return route if isinstance(route, dict) else {}
+        except Exception:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return {}
+
+            try:
+                route = json.loads(text[start : end + 1])
+                return route if isinstance(route, dict) else {}
+            except Exception:
+                return {}
