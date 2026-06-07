@@ -59,7 +59,7 @@ class QueryPipeline:
             retrieved = self.retriever.retrieve(
                 q,
                 top_k=route.candidate_top_k,
-                filters=route.filters or None,  # cần chỉnh Retriever nhận filters
+                filters=route.filters or None, 
             )
 
             for item in retrieved:

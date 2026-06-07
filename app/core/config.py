@@ -30,3 +30,14 @@ class Config:
     OLLAMA_HOST = os.getenv("OLLAMA_HOST")
     OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
+
+    JWT_SECRET_KEY = os.getenv(
+        "JWT_SECRET_KEY", "dev-only-change-this-jwt-secret"
+    )
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(
+        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")
+    )
+    REFRESH_TOKEN_EXPIRE_MINUTES = int(
+        os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 30))
+    )
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")

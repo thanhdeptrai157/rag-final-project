@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
+from app.api.dependencies import get_current_admin_user
 from app.schemas.document import (
     DocumentDeleteResponse,
     DocumentDetailResponse,
@@ -17,7 +18,7 @@ from app.schemas.document import (
 )
 from app.api.service.document_service import DocumentService
 
-document_router = APIRouter()
+document_router = APIRouter(dependencies=[Depends(get_current_admin_user)])
 
 
 @document_router.post(
