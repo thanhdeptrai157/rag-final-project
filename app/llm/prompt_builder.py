@@ -21,7 +21,7 @@ Trong đó N là số nguồn.
 
 Khi sử dụng thông tin từ nguồn nào:
 - Phải trích dẫn đúng số nguồn tương ứng.
-- Citation có dạng: [N]
+- Citation có dạng: [N], chỉ có số nguồn, không có chữ hoặc ký tự khác.
 - Có thể dùng nhiều nguồn: [1][3]
 - Không được tạo citation không tồn tại.
 - Không được trích dẫn sai nguồn.
@@ -60,8 +60,6 @@ YÊU CẦU TRẢ LỜI:
 - Trả lời đầy đủ nhất có thể dựa trên context.
 - Trả về bằng Markdown.
 - Sử dụng danh sách, tiêu đề, in đậm để trình bày rõ ràng.
-- Khi trả lời phải trích dẫn các phần thông tin đã sử dụng, ví dụ:
-  [Dẫn chứng: ...]
 - Nếu phát hiện nội dung bổ sung, sửa đổi hoặc bãi bỏ so với văn bản gốc thì phải nêu rõ:
   - [Bổ sung: ...]
   - [Thay đổi: ... thành ...]

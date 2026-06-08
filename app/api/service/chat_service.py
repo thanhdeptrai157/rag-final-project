@@ -11,7 +11,10 @@ class ChatService:
     def answer(self, question: str) -> ChatResponse:
         try:
             result = self.repo.answer_query(question=question, top_k=3)
-            return ChatResponse(answer=result["answer"], source=result["sources"])
+            return ChatResponse(
+                answer=str(result.get("answer") or ""),
+                source=result.get("sources") or [],
+            )
         except Exception as exc:
             return ChatResponse(
                 answer=f"Error processing request: {str(exc)}", source=[]

@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.routes.admin_router import admin_router
 from app.api.routes.auth_router import auth_router
 from app.api.routes.chat_router import chat_router
 from app.api.routes.document_router import document_router
@@ -7,6 +8,7 @@ from app.api.routes.job_router import job_router
 
 router = APIRouter()
 
+router.include_router(admin_router, prefix="/admin", tags=["admin"])
 router.include_router(auth_router, prefix="/auth", tags=["auth"])
 router.include_router(chat_router, prefix="/chat", tags=["chat"])
 router.include_router(document_router, prefix="/documents", tags=["document"])

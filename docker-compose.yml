@@ -16,6 +16,12 @@ services:
       - "8000:8000"
     volumes:
       - hf_cache:/app/.cache/huggingface
+    networks:
+      - rag-net
 
 volumes:
   hf_cache:
+
+networks:
+  rag-net:
+    driver: bridge

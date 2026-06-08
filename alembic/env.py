@@ -20,6 +20,7 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.core.database import Base
+from app.models.chat import ChatMessage, ChatSession, MessageFeedback, MessageRagTrace
 from app.models.chunk import Chunk
 from app.models.document import Document
 from app.models.document_version import DocumentVersion

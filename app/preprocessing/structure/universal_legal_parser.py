@@ -175,7 +175,7 @@ class UniversalLegalParser:
         text = self._break_appendix_inline_title(text)
         text = self._break_trailing_numbered_heading(text)
         text = self._break_inline_headings(text)
-        self._dump_debug_text(text)
+        # self._dump_debug_text(text)
         blocks = self._split_by_major_blocks(text)
 
         if blocks:
