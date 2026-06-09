@@ -1,6 +1,7 @@
 # app/pipelines/ingest_pipeline.py
 
 import hashlib
+import json
 import tempfile
 import uuid
 from pathlib import Path
@@ -15,6 +16,7 @@ from app.core.config import Config
 from app.core.database import SessionLocal
 from app.embedding.sentence_transformer_embedder import get_embedder
 from app.loaders.pdf_loader_paddle_ocr import PDFLoader
+from app.loaders.pdf_loader_mineru_ocr import MinerUPDFLoader
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.preprocessing.cleaners.text_cleaner import TextCleaner
@@ -26,7 +28,7 @@ from app.vectordb.qdrant_store import QdrantStore
 
 class IngestPipeline:
     def __init__(self):
-        self.pdf_loader = PDFLoader(enable_ocr=True, force_ocr=True)
+        self.pdf_loader = self._build_pdf_loader()
         self.text_cleaner = TextCleaner()
         self.chunker = UniversalLegalChunker()
         self.embedder = get_embedder()
@@ -60,6 +62,7 @@ class IngestPipeline:
                 print("[STEP 2] OCR PDF")
                 doc_schema = self.pdf_loader.load(tmp_file_path)
                 raw_text = doc_schema.raw_text
+                doc_schema.metadata = doc_schema.metadata or {}
 
                 print("[STEP 3] Cleaning text")
                 cleaned_text = self.text_cleaner.clean(raw_text)
@@ -74,6 +77,13 @@ class IngestPipeline:
                     context["document_id"], "cleaned_text", cleaned_text
                 )
 
+                layout_json_key, layout_data = self._upload_layout_json_to_r2(
+                    context["document_id"], doc_schema.metadata
+                )
+
+                if layout_json_key:
+                    doc_schema.metadata["layout_json_path"] = layout_json_key
+
                 previous_version = self._load_previous_version_context(
                     context["previous_version_id"]
                 )
@@ -85,7 +95,7 @@ class IngestPipeline:
                     source_type=context["source_type"],
                     title=context["title"],
                     raw_text=cleaned_text,
-                    metadata=doc_schema.metadata or {},
+                    metadata=doc_schema.metadata,
                     version_id=str(context["version_id"]),
                     version_no=context["version_no"],
                     previous_version_id=(
@@ -101,7 +111,7 @@ class IngestPipeline:
                 chunker = self.chunker
                 print(f"[STEP 5] Selected chunker: {chunker.__class__.__name__}")
 
-                chunks_schema = chunker.chunk(doc_for_chunking)
+                chunks_schema = chunker.chunk(doc_for_chunking, layout_data=layout_data)
                 print(f"[STEP 5] Created {len(chunks_schema)} chunks")
 
                 if not chunks_schema:
@@ -123,7 +133,7 @@ class IngestPipeline:
                         "chunk_index": chunk.chunk_index,
                         "chunk_text": chunk.text,
                         "token_count": None,
-                        "page_number": None,
+                        "page_number": chunk.page_start,
                         "section_path": chunk.section_path,
                         "metadata_json": chunk.metadata,
                     }
@@ -166,6 +176,7 @@ class IngestPipeline:
                     document_status="processed",
                     raw_text_path=raw_text_key,
                     cleaned_text_path=cleaned_text_key,
+                    layout_json_path=layout_json_key,
                     checksum=text_checksum,
                 )
 
@@ -174,6 +185,7 @@ class IngestPipeline:
                     "message": f"Ingest completed: {len(chunk_ids)} chunks processed",
                     "version_id": context["version_id"],
                     "chunk_count": len(chunk_ids),
+                    "layout_json_path": layout_json_key,
                 }
 
             finally:
@@ -194,6 +206,12 @@ class IngestPipeline:
 
             raise
 
+    def _build_pdf_loader(self):
+        provider = Config.PDF_OCR_PROVIDER
+        if provider in {"mineru", "mineru_ocr"}:
+            return MinerUPDFLoader(enable_ocr=True, force_ocr=True)
+        return PDFLoader(enable_ocr=True, force_ocr=True)
+
     def _upload_text_to_r2(
         self, document_id: uuid.UUID, text_type: str, content: str
     ) -> str:
@@ -213,8 +231,52 @@ class IngestPipeline:
         )
         return key
 
+    def _upload_layout_json_to_r2(
+        self, document_id: uuid.UUID, metadata: dict
+    ) -> tuple[str | None, dict | list | None]:
+        layout_bytes: bytes | None = None
+        layout_data: dict | list | None = None
+
+        layout_path = metadata.get("mineru_layout_path") or metadata.get("layout_path")
+
+        if layout_path:
+            path = Path(str(layout_path))
+            if path.exists():
+                layout_bytes = path.read_bytes()
+                try:
+                    layout_data = json.loads(layout_bytes.decode("utf-8"))
+                    print("[INGEST] Loaded layout data from local file")
+                except Exception as e:
+                    print(f"[INGEST] Warning: Failed to parse local layout json: {e}")
+                    layout_data = None
+
+        if layout_bytes is None and metadata.get("layout") is not None:
+            layout_data = metadata["layout"]
+            layout_bytes = json.dumps(layout_data, ensure_ascii=False, indent=2).encode(
+                "utf-8"
+            )
+
+        if layout_bytes is None:
+            return None, None
+
+        from datetime import datetime, timezone
+        import uuid as uuid_module
+
+        now = datetime.now(timezone.utc)
+        key = (
+            f"documents/text/{now.year}/{now.month:02d}/"
+            f"{document_id}/layout_json/{uuid_module.uuid4()}.json"
+        )
+
+        self.storage.upload_bytes(
+            data=layout_bytes,
+            object_key=key,
+            content_type="application/json; charset=utf-8",
+        )
+
+        return key, layout_data
+
     def _choose_chunker(self, text: str):
-        # Chunker detection removed: always use UniversalLegalChunker
         return self.chunker
 
     def _load_ingest_context(self, version_id) -> dict:
@@ -242,6 +304,7 @@ class IngestPipeline:
                 "source_file_path": version.source_file_path,
                 "title": document.title,
                 "source_type": document.source_type or "upload",
+                "layout_json_path": version.layout_json_path,
             }
 
     def _load_previous_version_context(self, previous_version_id) -> dict | None:
@@ -292,6 +355,7 @@ class IngestPipeline:
         document_status: str | None = None,
         raw_text_path: str | None = None,
         cleaned_text_path: str | None = None,
+        layout_json_path: str | None = None,
         checksum: str | None = None,
     ) -> None:
         with SessionLocal() as db:
@@ -309,6 +373,8 @@ class IngestPipeline:
                 version.raw_text_path = raw_text_path
             if cleaned_text_path is not None:
                 version.cleaned_text_path = cleaned_text_path
+            if layout_json_path is not None:
+                version.layout_json_path = layout_json_path
             if checksum is not None:
                 version.checksum = checksum
 

@@ -6,16 +6,19 @@ from app.schemas.chunk import Chunk
 
 
 def chunk_to_payload(chunk: Chunk) -> Dict[str, Any]:
+    metadata = chunk.metadata or {}
+
     return {
         "chunk_id": chunk.chunk_id,
         "document_id": chunk.document_id,
+        "version_id": metadata.get("document_version_id"),
         "chunk_type": chunk.chunk_type,
         "section_path": chunk.section_path,
         "title": chunk.title,
         "chunk_index": chunk.chunk_index,
         "total_chunks": chunk.total_chunks,
         "text": chunk.text,
-        "metadata": chunk.metadata,
+        "metadata": metadata,
     }
 
 

@@ -275,6 +275,7 @@ class DocumentService:
         self, document_id: UUID, version_id: UUID
     ) -> DocumentVersionDeleteResponse:
         version = self._require_version(document_id, version_id)
+        self._delete_version_vectors(version_id)
         self._delete_version_storage(version)
         self.version_repo.delete(version)
         return DocumentVersionDeleteResponse(
@@ -396,6 +397,7 @@ class DocumentService:
             status=version.status,
             raw_text_path=version.raw_text_path,
             cleaned_text_path=version.cleaned_text_path,
+            layout_json_path=version.layout_json_path,
             checksum=version.checksum,
             created_at=version.created_at,
             updated_at=version.updated_at,
@@ -428,6 +430,7 @@ class DocumentService:
                     version.source_file_path,
                     version.raw_text_path,
                     version.cleaned_text_path,
+                    version.layout_json_path,
                 ]
             )
 
@@ -444,6 +447,7 @@ class DocumentService:
             version.source_file_path,
             version.raw_text_path,
             version.cleaned_text_path,
+            version.layout_json_path,
         ]:
             if not key:
                 continue
@@ -459,4 +463,13 @@ class DocumentService:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to delete document chunks from Qdrant",
+            ) from exc
+
+    def _delete_version_vectors(self, version_id: UUID) -> None:
+        try:
+            self.qdrant_store.delete_by_version_id(str(version_id))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to delete document version chunks from Qdrant",
             ) from exc

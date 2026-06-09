@@ -1,7 +1,7 @@
 import re
 import unicodedata
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 from html import unescape
 from bs4 import BeautifulSoup
 
@@ -31,6 +31,10 @@ class ParsedChunk:
 
     target_article_number: Optional[str] = None
     target_clause_text: Optional[str] = None
+
+    # Layout information (bbox + page_idx)
+    bboxes: Optional[List[List[int]]] = None
+    page_indices: Optional[List[int]] = None
 
 
 class UniversalLegalParser:
@@ -209,6 +213,128 @@ class UniversalLegalParser:
                 )
             ]
         )
+
+    def parse_with_layout(
+        self, text: str, layout_data: Dict[str, Any]
+    ) -> List[ParsedChunk]:
+        """
+        Parse text và ghép bounding box + page_idx từ layout JSON.
+
+        Args:
+            text: Cleaned text đã extract từ PDF.
+            layout_data: Dict đã parse từ layout.json (cấu trúc MinerU).
+
+        Returns:
+            Danh sách ParsedChunk với bboxes và page_indices đã được gán.
+        """
+        chunks = self.parse(text)
+
+        if not layout_data:
+            return chunks
+
+        layout_entries = self._build_layout_entries(layout_data)
+
+        if layout_entries:
+            self._assign_layout_info(chunks, layout_entries)
+
+        return chunks
+
+    # ------------------------------------------------------------------
+    # Layout matching helpers
+    # ------------------------------------------------------------------
+
+    def _build_layout_entries(
+        self, layout_data: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Trích xuất tất cả text blocks từ layout JSON thành danh sách phẳng
+        gồm text, bbox, page_idx để phục vụ matching.
+        """
+        entries: List[Dict[str, Any]] = []
+
+        for page in layout_data.get("pdf_info", []):
+            page_idx = page.get("page_idx", 0)
+
+            for block in page.get("preproc_blocks", []):
+                text = self._extract_layout_block_text(block)
+
+                if not text:
+                    continue
+
+                entries.append(
+                    {
+                        "text": text,
+                        "normalized": self._normalize_for_layout_match(text),
+                        "bbox": block.get("bbox"),
+                        "page_idx": page_idx,
+                    }
+                )
+
+        return entries
+
+    def _extract_layout_block_text(self, block: Dict[str, Any]) -> str:
+        """
+        Trích xuất text content từ một layout block (bao gồm cả nested blocks).
+        """
+        texts: List[str] = []
+
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                content = span.get("content", "")
+                if content and span.get("type") == "text":
+                    texts.append(content)
+
+        # Xử lý nested blocks (ví dụ: image blocks có chứa text)
+        for child in block.get("blocks", []):
+            child_text = self._extract_layout_block_text(child)
+            if child_text:
+                texts.append(child_text)
+
+        return " ".join(texts).strip()
+
+    def _normalize_for_layout_match(self, text: str) -> str:
+        """
+        Normalize text để so khớp giữa chunk content và layout block text.
+        Loại bỏ whitespace thừa, lowercase, bỏ dấu.
+        """
+        text = re.sub(r"\s+", " ", text).strip()
+        return self._fold_text(text)
+
+    def _assign_layout_info(
+        self,
+        chunks: List[ParsedChunk],
+        layout_entries: List[Dict[str, Any]],
+    ) -> None:
+        """
+        Match từng chunk với các layout entries dựa trên text content.
+        Gán bboxes và page_indices cho mỗi chunk.
+        """
+        for chunk in chunks:
+            chunk_normalized = self._normalize_for_layout_match(chunk.content)
+
+            if not chunk_normalized:
+                continue
+
+            matched_bboxes: List[List[int]] = []
+            matched_pages: set[int] = set()
+
+            for entry in layout_entries:
+                entry_text = entry["normalized"]
+
+                if not entry_text:
+                    continue
+
+                # Kiểm tra text của layout block có nằm trong chunk không
+                if entry_text in chunk_normalized:
+                    if entry["bbox"]:
+                        matched_bboxes.append(entry["bbox"])
+                    matched_pages.add(entry["page_idx"])
+
+            if matched_bboxes:
+                chunk.bboxes = matched_bboxes
+
+            if matched_pages:
+                chunk.page_indices = sorted(matched_pages)
 
     # ------------------------------------------------------------------
     # Split major blocks: Article / Appendix / Chapter / Section

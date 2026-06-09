@@ -16,3 +16,5 @@ data
 *.md
 docs/
 test.py
+
+output/

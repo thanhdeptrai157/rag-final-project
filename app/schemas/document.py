@@ -82,6 +82,7 @@ class DocumentVersionListItem(BaseModel):
     status: str
     raw_text_path: str | None
     cleaned_text_path: str | None
+    layout_json_path: str | None
     checksum: str | None
     created_at: datetime
     updated_at: datetime
@@ -91,6 +92,7 @@ class DocumentVersionListItem(BaseModel):
 class DocumentVersionUpdateRequest(BaseModel):
     raw_text_path: str | None = None
     cleaned_text_path: str | None = None
+    layout_json_path: str | None = None
     checksum: str | None = None
 
 

@@ -18,6 +18,7 @@ class Config:
     QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "regulations")
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 800))
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 150))
+    PDF_OCR_PROVIDER = os.getenv("PDF_OCR_PROVIDER", "paddle").lower()
 
     DATABASE_URL = os.getenv("DATABASE_URL")
     DATABASE_POOL_RECYCLE_SECONDS = int(

@@ -142,6 +142,7 @@ class DocumentVersionRepository:
         status: str = "pending",
         raw_text_path: Optional[str] = None,
         cleaned_text_path: Optional[str] = None,
+        layout_json_path: Optional[str] = None,
         checksum: Optional[str] = None,
     ) -> DocumentVersion:
         """Tạo document version mới."""
@@ -155,6 +156,7 @@ class DocumentVersionRepository:
             status=status,
             raw_text_path=raw_text_path,
             cleaned_text_path=cleaned_text_path,
+            layout_json_path=layout_json_path,
             checksum=checksum,
         )
         self.db.add(version)

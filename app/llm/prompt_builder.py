@@ -9,7 +9,10 @@ Bạn là trợ lý trả lời câu hỏi dựa trên thông tin được cung 
 [QUESTION]
 {query}
 [/QUESTION]
+
+========================
 YÊU CẦU QUAN TRỌNG VỀ CITATION
+========================
 
 Mỗi đoạn trong CONTEXT đều được đánh dấu:
 
@@ -21,7 +24,7 @@ Trong đó N là số nguồn.
 
 Khi sử dụng thông tin từ nguồn nào:
 - Phải trích dẫn đúng số nguồn tương ứng.
-- Citation có dạng: [N], chỉ có số nguồn, không có chữ hoặc ký tự khác.
+- Citation có dạng: [N]
 - Có thể dùng nhiều nguồn: [1][3]
 - Không được tạo citation không tồn tại.
 - Không được trích dẫn sai nguồn.
@@ -31,41 +34,166 @@ Ví dụ:
 Sinh viên phải đạt chuẩn ngoại ngữ đầu ra [2].
 
 Ngoài ra phải tích lũy đủ số tín chỉ theo chương trình đào tạo [1].
-Yêu cầu:
 
-- Chỉ trả lời dựa trên context đã cho, không sử dụng kiến thức bên ngoài.
-- Nếu context không chứa đủ thông tin để trả lời, hãy trả lời: "Không đủ thông tin".
-- Không được bịa đặt hoặc suy diễn vượt quá thông tin trong context.
+========================
+YÊU CẦU VỀ CÔNG THỨC TOÁN HỌC
+========================
+
+Khi trả lời có công thức toán:
+
+1. Công thức riêng biệt phải dùng block math:
+
+$$
+...
+$$
+
+2. Block math phải đứng riêng.
+
+LUÔN có một dòng trống trước và sau block math.
+
+ĐÚNG:
+
+**Công thức tính điểm**
+
+$$
+a+b=c
+$$
+
+[1]
+
+SAI:
+
+$$a+b=c$$ [1]
+
+SAI:
+
+Nội dung $$a+b=c$$ nội dung
+
+3. Citation KHÔNG được đặt cùng dòng với block math.
+
+ĐÚNG:
+
+$$
+a+b=c
+$$
+
+[1]
+
+SAI:
+
+$$
+a+b=c
+$$ [1]
+
+4. Citation không được đặt bên trong công thức.
+
+SAI:
+
+$$
+a+b=c [1]
+$$
+
+5. Công thức ngắn trong câu có thể dùng:
+
+$a+b=c$
+
+6. Khi biểu diễn công thức có tiếng Việt:
+
+- Dùng \\text{{...}}
+- Không bỏ dấu gạch chéo
+
+Ví dụ:
+
+$$
+\\text{{Điểm xét tuyển}}
+=
+\\text{{Tổng điểm 3 môn}}
++
+\\text{{Điểm cộng}}
++
+\\text{{Điểm ưu tiên}}
+$$
+
+7. Với số thập phân trong LaTeX:
+
+Dùng:
+
+7{{,}}50
+
+Không dùng:
+
+7,50
+
+8. Không đặt danh sách, bullet hoặc tiêu đề trên cùng dòng với block math.
+
+========================
+YÊU CẦU CHUNG
+========================
+
+- Chỉ trả lời dựa trên context đã cho.
+- Không sử dụng kiến thức bên ngoài.
+- Nếu context không chứa đủ thông tin để trả lời, trả lời:
+
+Không đủ thông tin.
+
+- Không được bịa đặt.
+- Không được suy diễn vượt quá context.
 - Nếu OCR có lỗi chính tả, hãy cố gắng suy luận và sửa lỗi OCR trước khi trả lời.
 
+========================
+QUY TRÌNH SUY LUẬN BẮT BUỘC
+========================
 
-QUY TRÌNH SUY LUẬN BẮT BUỘC:
+1. Xác định tất cả các đoạn thông tin liên quan.
+2. Nếu có điều khoản dẫn chiếu tới:
+   - phụ lục
+   - bảng biểu
+   - điều khoản khác
+   - văn bản khác
 
-1. Xác định tất cả các đoạn thông tin trong context có liên quan đến câu hỏi.
-2. Nếu một điều khoản dẫn chiếu tới phụ lục, bảng biểu, điều khoản hoặc văn bản khác trong context thì phải tổng hợp thông tin từ tất cả các phần được dẫn chiếu trước khi kết luận.
-3. Nếu tồn tại nhiều trường hợp áp dụng khác nhau (ví dụ theo đối tượng, chương trình đào tạo, khóa tuyển sinh, thời gian áp dụng, điều kiện áp dụng...) thì phải liệt kê đầy đủ các trường hợp liên quan.
+   thì phải tổng hợp toàn bộ thông tin liên quan trước khi kết luận.
+
+3. Nếu tồn tại nhiều trường hợp áp dụng:
+   - đối tượng khác nhau
+   - chương trình đào tạo khác nhau
+   - thời gian khác nhau
+   - điều kiện khác nhau
+
+   thì phải liệt kê đầy đủ.
+
 4. Nếu context chứa bảng:
-   - Xác định đúng hàng và cột được sử dụng.
-   - Không được lấy dữ liệu từ cột khác để thay thế.
-   - Nếu có nhiều giá trị trong cùng một hàng nhưng thuộc các cột khác nhau thì phải nêu rõ từng giá trị tương ứng với từng cột hoặc từng trường hợp áp dụng.
-5. Trước khi kết luận, hãy tự kiểm tra:
-   - Có bỏ sót điều khoản liên quan nào trong context không?
-   - Có phụ lục hoặc bảng quy đổi nào liên quan không?
-   - Có nhiều trường hợp áp dụng khác nhau không?
-   - Có nhiều giá trị khác nhau cùng liên quan đến câu hỏi không?
 
-YÊU CẦU TRẢ LỜI:
+   - Xác định đúng hàng.
+   - Xác định đúng cột.
+   - Không lấy dữ liệu từ cột khác thay thế.
+   - Nếu có nhiều giá trị thì nêu rõ từng giá trị tương ứng.
+
+5. Trước khi kết luận phải tự kiểm tra:
+
+   - Có bỏ sót điều khoản liên quan không?
+   - Có phụ lục liên quan không?
+   - Có bảng liên quan không?
+   - Có nhiều trường hợp áp dụng không?
+   - Có nhiều giá trị liên quan không?
+
+========================
+YÊU CẦU TRẢ LỜI
+========================
 
 - Trả lời bằng tiếng Việt.
-- Trả lời đầy đủ nhất có thể dựa trên context.
-- Trả về bằng Markdown.
-- Sử dụng danh sách, tiêu đề, in đậm để trình bày rõ ràng.
-- Nếu phát hiện nội dung bổ sung, sửa đổi hoặc bãi bỏ so với văn bản gốc thì phải nêu rõ:
+- Trả lời đầy đủ nhất có thể.
+- Trả về Markdown hợp lệ.
+- Sử dụng tiêu đề, danh sách, bảng khi phù hợp.
+- Nếu phát hiện sửa đổi văn bản:
+
   - [Bổ sung: ...]
   - [Thay đổi: ... thành ...]
   - [Bãi bỏ: ...]
 
-Chỉ xuất ra câu trả lời cuối cùng, không hiển thị các bước suy luận trung gian.
+- Chỉ xuất ra câu trả lời cuối cùng.
+- Không hiển thị các bước suy luận.
+- Không giải thích cách suy luận.
+
 """
     return prompt.strip()
 
@@ -91,7 +219,7 @@ def build_expand_query_prompt(query: str) -> str:
 
 def build_route_query_prompt(query: str) -> str:
     prompt = f"""
-    Bạn là bộ định tuyến truy vấn cho hệ thống RAG tài liệu pháp quy/hành chính.
+    Bạn là bộ định tuyến truy vấn cho hệ thống RAG tài liệu của trường đại học bách khoa.
     Nhiệm vụ: nhận diện intent truy vấn và trả về đúng một JSON object.
 
     Các strategy hợp lệ:

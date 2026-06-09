@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.preprocessing.structure.universal_legal_parser import (
     ParsedChunk,
@@ -13,8 +13,15 @@ class UniversalLegalChunker:
     def __init__(self) -> None:
         self.parser = UniversalLegalParser()
 
-    def chunk(self, document: Document) -> List[Chunk]:
-        parsed_chunks = self.parser.parse(document.raw_text)
+    def chunk(
+        self, document: Document, layout_data: Dict[str, Any] | None = None
+    ) -> List[Chunk]:
+        if layout_data:
+            parsed_chunks = self.parser.parse_with_layout(
+                document.raw_text, layout_data
+            )
+        else:
+            parsed_chunks = self.parser.parse(document.raw_text)
 
         chunks: List[Chunk] = []
         total_chunks = len(parsed_chunks)
@@ -24,6 +31,12 @@ class UniversalLegalChunker:
             title = self._build_title(item)
             section_path = self._build_section_path(item)
 
+            page_start = None
+            page_end = None
+            if item.page_indices:
+                page_start = min(item.page_indices) + 1
+                page_end = max(item.page_indices) + 1
+
             chunk = Chunk(
                 chunk_id=chunk_id,
                 document_id=document.doc_id,
@@ -32,6 +45,8 @@ class UniversalLegalChunker:
                 chunk_type=self._build_chunk_type(item),
                 title=title,
                 section_path=section_path,
+                page_start=page_start,
+                page_end=page_end,
                 chunk_index=idx,
                 total_chunks=total_chunks,
                 metadata=self._build_metadata(
@@ -236,6 +251,10 @@ class UniversalLegalChunker:
             "article_number": item.article_number,
             "heading_level": item.heading_level,
             "heading_number": item.heading_number,
+            "bboxes": item.bboxes,
+            "page_indices": item.page_indices,
+            "page_start": min(item.page_indices) + 1 if item.page_indices else None,
+            "page_end": max(item.page_indices) + 1 if item.page_indices else None,
         }
 
         if item.chunk_kind == "amendment":

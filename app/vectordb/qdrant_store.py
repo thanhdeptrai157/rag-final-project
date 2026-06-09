@@ -55,9 +55,11 @@ class QdrantStore:
     def ensure_payload_indexes(self) -> None:
         indexes = {
             "document_id": models.PayloadSchemaType.KEYWORD,
+            "version_id": models.PayloadSchemaType.KEYWORD,
             "chunk_id": models.PayloadSchemaType.KEYWORD,
             "chunk_type": models.PayloadSchemaType.KEYWORD,
             "metadata.document_id": models.PayloadSchemaType.KEYWORD,
+            "metadata.document_version_id": models.PayloadSchemaType.KEYWORD,
             "metadata.status": models.PayloadSchemaType.KEYWORD,
             "metadata.is_current": models.PayloadSchemaType.BOOL,
         }
@@ -171,10 +173,32 @@ class QdrantStore:
             ]
         )
 
+    def _version_filter(self, version_id: str) -> models.Filter:
+        return models.Filter(
+            should=[
+                models.FieldCondition(
+                    key="version_id",
+                    match=models.MatchValue(value=str(version_id)),
+                ),
+                models.FieldCondition(
+                    key="metadata.document_version_id",
+                    match=models.MatchValue(value=str(version_id)),
+                ),
+            ]
+        )
+
     def count_by_document_id(self, document_id: str) -> int:
         result = self.client.count(
             collection_name=self.collection_name,
             count_filter=self._document_filter(document_id),
+            exact=True,
+        )
+        return result.count
+
+    def count_by_version_id(self, version_id: str) -> int:
+        result = self.client.count(
+            collection_name=self.collection_name,
+            count_filter=self._version_filter(version_id),
             exact=True,
         )
         return result.count
@@ -207,6 +231,38 @@ class QdrantStore:
         except Exception as e:
             print(
                 f"[QDRANT] Delete failed document_id={doc_id}: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise
+
+    def delete_by_version_id(self, version_id: str, wait: bool = True) -> None:
+        ver_id = str(version_id)
+        qfilter = self._version_filter(ver_id)
+
+        try:
+            self.ensure_payload_indexes()
+
+            before_count = self.count_by_version_id(ver_id)
+            print(f"[QDRANT] Found {before_count} points for version_id={ver_id}")
+
+            if before_count == 0:
+                print(f"[QDRANT] Nothing to delete for version_id={ver_id}")
+                return
+
+            result = self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=qfilter),
+                wait=wait,
+            )
+
+            print(f"[QDRANT] Delete result for version_id={ver_id}: {result}")
+
+            after_count = self.count_by_version_id(ver_id)
+            print(f"[QDRANT] Remaining points for version_id={ver_id}: {after_count}")
+
+        except Exception as e:
+            print(
+                f"[QDRANT] Delete failed version_id={ver_id}: "
                 f"{type(e).__name__}: {e}"
             )
             raise

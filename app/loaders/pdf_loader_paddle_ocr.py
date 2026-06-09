@@ -73,8 +73,9 @@ class PDFLoader:
                 jsonl_url = job_resp.json()["data"]["resultUrl"]["jsonUrl"]
                 break
             if state == "failed":
+                error_msg = job_resp.json()["data"].get("errorMsg")
                 raise RuntimeError(
-                    f"Paddle OCR job failed: {job_resp.json()["data"].get('errorMsg')}"
+                    f"Paddle OCR job failed: {error_msg}"
                 )
 
             time.sleep(self.poll_interval)

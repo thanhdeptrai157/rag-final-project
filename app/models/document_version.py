@@ -41,6 +41,7 @@ class DocumentVersion(Base, BaseModel):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     raw_text_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     cleaned_text_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layout_json_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     document = relationship("Document", back_populates="versions")
