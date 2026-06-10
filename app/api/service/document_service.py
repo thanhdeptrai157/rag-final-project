@@ -15,19 +15,18 @@ from app.core.config import Config
 from app.core.database import SessionLocal
 from app.models.document import Document
 from app.workers.background_worker import get_worker
+from app.schemas.common import PageResponse
 from app.schemas.document import (
     DocumentDeleteResponse,
     DocumentDetailResponse,
     DocumentJobsStreamEvent,
     DocumentListItem,
-    DocumentListResponse,
     DocumentUpdateRequest,
     DocumentUploadResponse,
     DocumentVersionUploadResponse,
     DocumentVersionDeleteResponse,
     DocumentVersionDetailResponse,
     DocumentVersionListItem,
-    DocumentVersionListResponse,
     DocumentVersionUpdateRequest,
 )
 from app.services.storage.r2_storage import R2Storage
@@ -174,14 +173,13 @@ class DocumentService:
             job_id=str(job.job_id),
         )
 
-    def list_documents(self, page: int, page_size: int) -> DocumentListResponse:
+    def list_documents(self, page: int, page_size: int) -> PageResponse[DocumentListItem]:
         items, total = self.repo.list_paginated(page=page, page_size=page_size)
-        return DocumentListResponse(
+        return PageResponse[DocumentListItem].create(
             items=[self._to_document_list_item(document) for document in items],
+            total=total,
             page=page,
             page_size=page_size,
-            total=total,
-            total_pages=max((total + page_size - 1) // page_size, 1) if total else 0,
         )
 
     def get_document(self, document_id: UUID) -> DocumentDetailResponse:
@@ -236,17 +234,16 @@ class DocumentService:
 
     def list_versions(
         self, document_id: UUID, page: int, page_size: int
-    ) -> DocumentVersionListResponse:
+    ) -> PageResponse[DocumentVersionListItem]:
         self._require_document(document_id)
         items, total = self.version_repo.list_versions(
             document_id=document_id, page=page, page_size=page_size
         )
-        return DocumentVersionListResponse(
+        return PageResponse[DocumentVersionListItem].create(
             items=[self._to_version_list_item(version) for version in items],
+            total=total,
             page=page,
             page_size=page_size,
-            total=total,
-            total_pages=max((total + page_size - 1) // page_size, 1) if total else 0,
         )
 
     def get_version(

@@ -178,3 +178,4 @@ class UserService:
             refresh_token=refresh_token,
             user=UserResponse.model_validate(user),
         )
+        

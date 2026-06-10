@@ -219,32 +219,34 @@ def build_expand_query_prompt(query: str) -> str:
 
 def build_route_query_prompt(query: str) -> str:
     prompt = f"""
-    Bạn là bộ định tuyến truy vấn cho hệ thống RAG tài liệu của trường đại học bách khoa.
-    Nhiệm vụ: nhận diện intent truy vấn và trả về đúng một JSON object.
+Bạn là bộ định tuyến truy vấn cho hệ thống RAG tài liệu của trường đại học bách khoa.
+Nhiệm vụ: nhận diện intent truy vấn và trả về đúng một JSON object.
 
-    Các strategy hợp lệ:
-    - exact_legal_lookup: hỏi trực tiếp về điều/khoản/điểm hoặc một số điều cụ thể.
-    - appendix_lookup: hỏi về phụ lục, bảng, biểu mẫu, khung, quy đổi, danh mục, mẫu.
-    - amendment_lookup: hỏi về sửa đổi, bổ sung, bãi bỏ, thay thế, nội dung hiện hành, khác biệt giữa bản mới/cũ.
-    - broad_semantic_rag: câu hỏi nội dung tổng quát cần tìm kiếm ngữ nghĩa.
-    - low_context_or_invalid: câu quá ngắn, chào hỏi, không rõ nghĩa, hoặc không liên quan tài liệu.
+Các strategy hợp lệ:
+- exact_legal_lookup: CHỈ dùng khi hỏi trực tiếp về điều/khoản/điểm hoặc một số điều cụ thể.
+- appendix_lookup: CHỈ dùng khi câu hỏi nhắc rõ phụ lục, biểu mẫu, mẫu đơn, mẫu phiếu, bảng quy đổi, khung năng lực, hoặc danh mục trong phụ lục.
+- amendment_lookup: CHỈ dùng khi hỏi về sửa đổi, bổ sung, bãi bỏ, thay thế, nội dung hiện hành, khác biệt giữa bản mới/cũ.
+- broad_semantic_rag: câu hỏi nội dung tổng quát cần tìm kiếm ngữ nghĩa.
+- low_context_or_invalid: câu quá ngắn, chào hỏi, không rõ nghĩa, hoặc không liên quan tài liệu.
 
-    Quy tắc:
-    1. Chỉ trả về JSON object, không markdown, không giải thích ngoài JSON.
-    2. Không trả lời câu hỏi của người dùng.
-    3. Nếu thấy số điều, điền article_number dạng chuỗi, ví dụ "12", "12a".
-    4. Nếu thấy phụ lục, điền appendix_number dạng chuỗi in hoa, ví dụ "I", "II", "3".
-    5. confidence nằm trong khoảng 0 đến 1.
+Quy tắc:
+1. Chỉ trả về JSON object, không markdown, không giải thích ngoài JSON.
+2. Không trả lời câu hỏi của người dùng.
+3. Nếu thấy số điều, điền article_number dạng chuỗi, ví dụ "12", "12a".
+4. Nếu thấy phụ lục, điền appendix_number dạng chuỗi in hoa, ví dụ "I", "II", "3".
+5. confidence nằm trong khoảng 0 đến 1.
+6. Không chọn appendix_lookup chỉ vì câu hỏi có từ điểm, ngành, năm, bảng điểm, điểm chuẩn.
+7. Các câu hỏi về điểm chuẩn, điểm tốt nghiệp, xếp loại, ngành tuyển sinh, năm tuyển sinh => broad_semantic_rag, trừ khi có nhắc rõ phụ lục/bảng quy đổi/khung năng lực.
 
-    Schema:
-    {{
-      "strategy": "exact_legal_lookup",
-      "article_number": null,
-      "appendix_number": null,
-      "confidence": 0.0,
-      "reason": "ngắn gọn"
-    }}
+Schema:
+{{
+  "strategy": "broad_semantic_rag",
+  "article_number": null,
+  "appendix_number": null,
+  "confidence": 0.0,
+  "reason": "ngắn gọn"
+}}
 
-    Câu hỏi: {query}
-    """
+Câu hỏi: {query}
+"""
     return prompt.strip()

@@ -33,6 +33,7 @@ from app.schemas.chat import (
     MessageRagTraceOut,
     UserBasicOut,
 )
+from app.schemas.common import PageResponse
 
 
 class ChatSessionService:
@@ -374,9 +375,9 @@ class AdminFeedbackService:
         admin_status: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> list[AdminFeedbackItemOut]:
+        page: int = 1,
+        page_size: int = 20,
+    ) -> PageResponse[AdminFeedbackItemOut]:
         query = self._feedback_query()
         query = self._apply_filters(
             query,
@@ -386,13 +387,20 @@ class AdminFeedbackService:
             date_from=date_from,
             date_to=date_to,
         )
+        total: int = query.count()
+        offset = (page - 1) * page_size
         feedbacks = (
             query.order_by(MessageFeedback.created_at.desc())
             .offset(offset)
-            .limit(limit)
+            .limit(page_size)
             .all()
         )
-        return [self._to_admin_feedback_item(feedback) for feedback in feedbacks]
+        return PageResponse[AdminFeedbackItemOut].create(
+            items=[self._to_admin_feedback_item(feedback) for feedback in feedbacks],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
 
     def update_feedback(
         self, *, current_admin: User, feedback_id: UUID, payload: MessageFeedbackUpdate
@@ -516,7 +524,7 @@ class EvaluationDashboardService:
                 .all()
             )
         }
-        recent_feedbacks = self.admin_feedback_service.list_feedbacks(limit=5, offset=0)
+        recent_feedbacks = self.admin_feedback_service.list_feedbacks(page=1, page_size=5).items
         recent_sessions = (
             self.db.query(ChatSession)
             .filter(ChatSession.deleted_at.is_(None))

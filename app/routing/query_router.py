@@ -55,20 +55,21 @@ class QueryRouter:
             )
 
         appendix_number = self._extract_appendix_number(normalized)
-        if appendix_number:
+        if appendix_number or self._has_appendix_intent(normalized):
+            filters = {"chunk_kind": "appendix"}
+            if appendix_number:
+                filters["appendix_number"] = appendix_number
+
             return QueryRoute(
                 strategy=QueryStrategy.APPENDIX_LOOKUP,
                 normalized_query=normalized,
-                filters={
-                    "chunk_kind": "appendix",
-                    "appendix_number": appendix_number,
-                },
+                filters=filters,
                 top_k=top_k,
                 candidate_top_k=max(top_k * 4, 12),
                 use_query_expansion=False,
             )
 
-        if any(x in normalized for x in ["sua doi", "bo sung", "bai bo", "thay the", "hien hanh"]):
+        if self._has_amendment_intent(normalized):
             return QueryRoute(
                 strategy=QueryStrategy.AMENDMENT_LOOKUP,
                 normalized_query=normalized,
@@ -109,6 +110,7 @@ class QueryRouter:
         article_number = self._extract_article_number(normalized) or self._clean_token(
             decision.get("article_number")
         )
+
         appendix_number = self._extract_appendix_number(
             normalized
         ) or self._clean_token(decision.get("appendix_number"), uppercase=True)
@@ -116,6 +118,7 @@ class QueryRouter:
         if strategy == QueryStrategy.EXACT_LEGAL_LOOKUP:
             if not article_number:
                 return None
+
             return QueryRoute(
                 strategy=strategy,
                 normalized_query=normalized,
@@ -127,6 +130,16 @@ class QueryRouter:
             )
 
         if strategy == QueryStrategy.APPENDIX_LOOKUP:
+            if not appendix_number and not self._has_appendix_intent(normalized):
+                return self._broad_route(
+                    normalized=normalized,
+                    top_k=top_k,
+                    boosts={
+                        "llm_confidence": confidence,
+                        "llm_rejected_strategy": "appendix_lookup",
+                    },
+                )
+
             filters = {"chunk_kind": "appendix"}
             if appendix_number:
                 filters["appendix_number"] = appendix_number
@@ -142,6 +155,16 @@ class QueryRouter:
             )
 
         if strategy == QueryStrategy.AMENDMENT_LOOKUP:
+            if not self._has_amendment_intent(normalized):
+                return self._broad_route(
+                    normalized=normalized,
+                    top_k=top_k,
+                    boosts={
+                        "llm_confidence": confidence,
+                        "llm_rejected_strategy": "amendment_lookup",
+                    },
+                )
+
             filters = {"is_amendment": True}
             if article_number:
                 filters["article_number"] = article_number
@@ -186,11 +209,56 @@ class QueryRouter:
             use_query_expansion=True,
         )
 
+    def _has_appendix_intent(self, text: str) -> bool:
+        positive_patterns = [
+            r"\bphu\s*luc\b",
+            r"\bbieu\s*mau\b",
+            r"\bmau\s+don\b",
+            r"\bmau\s+phieu\b",
+            r"\bmau\s+van\s+ban\b",
+            r"\bbang\s+quy\s+doi\b",
+            r"\bquy\s+doi\b",
+            r"\bkhung\s+nang\s+luc\b",
+            r"\bdanh\s+muc\s+trong\s+phu\s*luc\b",
+        ]
+
+        negative_patterns = [
+            r"\bdiem\s+chuan\b",
+            r"\bdiem\s+cac\s+nganh\b",
+            r"\bdiem\s+nganh\b",
+            r"\bnganh\s+trong\s+diem\b",
+            r"\bkhoa\s+hoc\s+du\s+lieu\b",
+            r"\btuyen\s+sinh\b",
+            r"\bxet\s+tuyen\b",
+        ]
+
+        if any(re.search(pattern, text) for pattern in negative_patterns):
+            if not re.search(r"\bphu\s*luc\b", text):
+                return False
+
+        return any(re.search(pattern, text) for pattern in positive_patterns)
+
+    def _has_amendment_intent(self, text: str) -> bool:
+        return any(
+            x in text
+            for x in [
+                "sua doi",
+                "bo sung",
+                "bai bo",
+                "thay the",
+                "hien hanh",
+                "ban moi",
+                "ban cu",
+                "khac biet",
+            ]
+        )
+
     def _coerce_confidence(self, value) -> float:
         try:
             confidence = float(value)
         except (TypeError, ValueError):
             return 0.0
+
         return max(0.0, min(confidence, 1.0))
 
     def _clean_token(self, value, uppercase: bool = False) -> str | None:
@@ -211,6 +279,7 @@ class QueryRouter:
         match = re.search(r"\bphu\s*luc\s+([ivxlcdm]+|\d+)\b", text)
         if not match:
             return None
+
         return match.group(1).upper()
 
     def _fold_text(self, text: str) -> str:

@@ -4,16 +4,17 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import get_current_admin_user
+from app.schemas.common import PageResponse
 from app.schemas.document import (
     DocumentDeleteResponse,
     DocumentDetailResponse,
-    DocumentListResponse,
+    DocumentListItem,
     DocumentUpdateRequest,
     DocumentUploadResponse,
     DocumentVersionUploadResponse,
     DocumentVersionDeleteResponse,
     DocumentVersionDetailResponse,
-    DocumentVersionListResponse,
+    DocumentVersionListItem,
     DocumentVersionUpdateRequest,
 )
 from app.api.service.document_service import DocumentService
@@ -46,12 +47,12 @@ async def upload_document_version(
     return await service.upload_document_version(document_id, file)
 
 
-@document_router.get("", response_model=DocumentListResponse)
+@document_router.get("", response_model=PageResponse[DocumentListItem])
 def list_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     service: DocumentService = Depends(),
-) -> DocumentListResponse:
+) -> PageResponse[DocumentListItem]:
     return service.list_documents(page=page, page_size=page_size)
 
 
@@ -81,14 +82,14 @@ def delete_document(
 
 
 @document_router.get(
-    "/{document_id}/versions", response_model=DocumentVersionListResponse
+    "/{document_id}/versions", response_model=PageResponse[DocumentVersionListItem]
 )
 def list_document_versions(
     document_id: UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     service: DocumentService = Depends(),
-) -> DocumentVersionListResponse:
+) -> PageResponse[DocumentVersionListItem]:
     return service.list_versions(
         document_id=document_id, page=page, page_size=page_size
     )

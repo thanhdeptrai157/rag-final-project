@@ -56,3 +56,12 @@ class UserRepository:
         self.db.commit()
         self.db.refresh(user)
         return user
+
+    def get_all(self) -> list[User]:
+        return self.db.query(User).all()
+
+    def list_paginated(self, *, page: int, page_size: int) -> tuple[list[User], int]:
+        query = self.db.query(User).order_by(User.created_at.desc())
+        total = query.count()
+        items = query.offset((page - 1) * page_size).limit(page_size).all()
+        return items, total
