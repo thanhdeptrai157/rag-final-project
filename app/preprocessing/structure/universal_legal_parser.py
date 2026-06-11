@@ -1,7 +1,7 @@
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from html import unescape
 from bs4 import BeautifulSoup
 
@@ -32,8 +32,17 @@ class ParsedChunk:
     target_article_number: Optional[str] = None
     target_clause_text: Optional[str] = None
 
-    # Layout information (bbox + page_idx)
-    bboxes: Optional[List[List[int]]] = None
+    # Layout information from MinerU para_blocks.
+    # Each item keeps its own page_idx so downstream/highlight logic does not
+    # need to infer the page from a separate parallel list.
+    # Example: [{"bbox": [x0, y0, x1, y1], "page_idx": 0}]
+    bboxes: Optional[List[Dict[str, Any]]] = None
+
+    # Page size per page_idx touched by this chunk.
+    # Example: {0: {"width": 595, "height": 842}}
+    page_sizes: Optional[Dict[int, Dict[str, float]]] = None
+
+    # Backward-compatible convenience field. Prefer bboxes[*].page_idx.
     page_indices: Optional[List[int]] = None
 
 
@@ -170,7 +179,11 @@ class UniversalLegalParser:
         except Exception as e:
             print(f"[DEBUG] Failed to dump cleaned text: {e}")
 
-    def parse(self, text: str) -> List[ParsedChunk]:
+    def parse(
+        self,
+        text: str,
+        layout_index: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[ParsedChunk]:
         text = self._normalize_text(text)
         text = self._normalize_ocr_errors(text)
         text = self._normalize_footnote_markers(text)
@@ -180,7 +193,7 @@ class UniversalLegalParser:
         text = self._break_trailing_numbered_heading(text)
         text = self._break_inline_headings(text)
         # self._dump_debug_text(text)
-        blocks = self._split_by_major_blocks(text)
+        blocks = self._split_by_major_blocks(text, layout_index=layout_index)
 
         if blocks:
             chunks: List[ParsedChunk] = []
@@ -219,43 +232,229 @@ class UniversalLegalParser:
     ) -> List[ParsedChunk]:
         """
         Parse text và ghép bounding box + page_idx từ layout JSON.
+        Layout info được gán TRONG LÚC parse (line-level matching)
+        thay vì post-process sau khi text đã bị transform.
 
         Args:
             text: Cleaned text đã extract từ PDF.
             layout_data: Dict đã parse từ layout.json (cấu trúc MinerU).
 
         Returns:
-            Danh sách ParsedChunk với bboxes và page_indices đã được gán.
+            Danh sách ParsedChunk với bboxes có page_idx và page_sizes đã được gán.
         """
-        chunks = self.parse(text)
-
         if not layout_data:
-            return chunks
+            return self.parse(text)
 
-        layout_entries = self._build_layout_entries(layout_data)
-
-        if layout_entries:
-            self._assign_layout_info(chunks, layout_entries)
-
-        return chunks
+        layout_index = self._build_layout_index(layout_data)
+        return self.parse(text, layout_index=layout_index)
 
     # ------------------------------------------------------------------
-    # Layout matching helpers
+    # Layout index building and line-level matching (primary approach)
     # ------------------------------------------------------------------
 
-    def _build_layout_entries(
+    def _build_layout_index(
         self, layout_data: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Trích xuất tất cả text blocks từ layout JSON thành danh sách phẳng
-        gồm text, bbox, page_idx để phục vụ matching.
+        Build a flat index of layout entries for line-level matching during parse.
+        Ưu tiên MinerU para_blocks vì đây là block đã có reading order và paragraph segmentation.
         """
         entries: List[Dict[str, Any]] = []
 
         for page in layout_data.get("pdf_info", []):
             page_idx = page.get("page_idx", 0)
+            page_size = self._extract_page_size(page)
 
-            for block in page.get("preproc_blocks", []):
+            # MinerU: para_blocks là kết quả đã xử lý paragraph/reading order.
+            # Fallback sang preproc_blocks chỉ để tương thích với layout cũ.
+            blocks = page.get("para_blocks") or page.get("preproc_blocks") or []
+            for block in blocks:
+                self._extract_block_entries_to_index(block, page_idx, page_size, entries)
+
+        return entries
+
+    def _extract_page_size(self, page: Dict[str, Any]) -> Optional[Dict[str, float]]:
+        """Extract page width/height from common MinerU layout.json shapes."""
+        size = page.get("page_size") or page.get("size")
+
+        if isinstance(size, dict):
+            width = size.get("width") or size.get("w")
+            height = size.get("height") or size.get("h")
+            if width is not None and height is not None:
+                return {"width": float(width), "height": float(height)}
+
+        if isinstance(size, (list, tuple)) and len(size) >= 2:
+            return {"width": float(size[0]), "height": float(size[1])}
+
+        width = page.get("width") or page.get("page_width")
+        height = page.get("height") or page.get("page_height")
+        if width is not None and height is not None:
+            return {"width": float(width), "height": float(height)}
+
+        return None
+
+    def _extract_block_entries_to_index(
+        self,
+        block: Dict[str, Any],
+        page_idx: int,
+        page_size: Optional[Dict[str, float]],
+        entries: List[Dict[str, Any]],
+    ) -> None:
+        """Recursively extract layout entries from a para/preproc block at span/line/block levels."""
+        block_bbox = block.get("bbox")
+        all_texts: List[str] = []
+
+        for line in block.get("lines", []):
+            line_bbox = line.get("bbox")
+            line_texts: List[str] = []
+
+            for span in line.get("spans", []):
+                content = span.get("content", "")
+                if not content or span.get("type") != "text":
+                    continue
+
+                line_texts.append(content)
+
+                # Span-level entry (finest granularity)
+                span_bbox = span.get("bbox") or line_bbox or block_bbox
+                if span_bbox:
+                    folded = self._normalize_for_layout_match(content)
+                    if folded:
+                        entries.append(
+                            {
+                                "text": content,
+                                "folded": folded,
+                                "bbox": span_bbox,
+                                "page_idx": page_idx,
+                                "page_size": page_size,
+                            }
+                        )
+
+            if line_texts:
+                all_texts.extend(line_texts)
+
+                # Line-level entry (only when multiple spans merge into one line)
+                if len(line_texts) > 1:
+                    line_text = " ".join(line_texts)
+                    use_bbox = line_bbox or block_bbox
+                    if use_bbox:
+                        folded = self._normalize_for_layout_match(line_text)
+                        if folded:
+                            entries.append(
+                                {
+                                    "text": line_text,
+                                    "folded": folded,
+                                    "bbox": use_bbox,
+                                    "page_idx": page_idx,
+                                    "page_size": page_size,
+                                }
+                            )
+
+        # Block-level entry (full text of block, coarsest granularity)
+        if all_texts and block_bbox:
+            block_text = " ".join(all_texts)
+            folded = self._normalize_for_layout_match(block_text)
+            if folded:
+                entries.append(
+                    {
+                        "text": block_text,
+                        "folded": folded,
+                        "bbox": block_bbox,
+                        "page_idx": page_idx,
+                        "page_size": page_size,
+                    }
+                )
+
+        # Handle nested blocks (e.g., image blocks with sub-blocks)
+        for child in block.get("blocks", []):
+            self._extract_block_entries_to_index(child, page_idx, page_size, entries)
+
+    def _normalize_for_layout_match(self, text: str) -> str:
+        """
+        Normalize text để so khớp giữa parser line và layout block text.
+        Loại bỏ whitespace thừa, lowercase, bỏ dấu.
+        """
+        text = re.sub(r"\s+", " ", text).strip()
+        return self._fold_text(text)
+
+    def _lookup_layout_for_line(
+        self,
+        line_folded: str,
+        layout_index: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Tìm layout entries khớp với một parser line dựa trên fold-text.
+        Match theo cả hai chiều: line in entry, hoặc entry in line.
+
+        Returns:
+            Danh sách entries duy nhất (deduped theo bbox + page_idx).
+        """
+        if len(line_folded) < 10:
+            return []
+
+        matched: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        for entry in layout_index:
+            ef = entry["folded"]
+            if not ef or len(ef) < 8:
+                continue
+
+            is_match = False
+
+            if ef == line_folded:
+                # Exact match
+                is_match = True
+            elif len(line_folded) >= 20 and line_folded in ef:
+                # Parser line là substring của layout entry (line ngắn hơn block)
+                is_match = True
+            elif len(ef) >= 20 and ef in line_folded:
+                # Layout entry là substring của parser line (block ngắn hơn line)
+                is_match = True
+
+            if is_match:
+                bbox = entry.get("bbox")
+                key = (tuple(bbox) if bbox else None, entry["page_idx"])
+                if key not in seen:
+                    seen.add(key)
+                    matched.append(entry)
+
+        return matched
+
+    def _propagate_block_layout(
+        self, block: dict, chunks: List[ParsedChunk]
+    ) -> None:
+        """
+        Gán bboxes và page_indices từ block dict sang các ParsedChunks.
+        Chỉ gán nếu chunk chưa có layout info (không ghi đè).
+        """
+        bboxes = block.get("bboxes")
+        page_sizes = block.get("page_sizes")
+        page_indices = block.get("page_indices")
+
+        for chunk in chunks:
+            if bboxes is not None and chunk.bboxes is None:
+                chunk.bboxes = bboxes
+            if page_sizes is not None and chunk.page_sizes is None:
+                chunk.page_sizes = page_sizes
+            if page_indices is not None and chunk.page_indices is None:
+                chunk.page_indices = page_indices
+
+    # ------------------------------------------------------------------
+    # Legacy layout helpers (kept for backward compatibility)
+    # ------------------------------------------------------------------
+
+    def _build_layout_entries(
+        self, layout_data: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Legacy: block-level only layout entries."""
+        entries: List[Dict[str, Any]] = []
+
+        for page in layout_data.get("pdf_info", []):
+            page_idx = page.get("page_idx", 0)
+            page_size = self._extract_page_size(page)
+
+            for block in page.get("para_blocks") or page.get("preproc_blocks", []):
                 text = self._extract_layout_block_text(block)
 
                 if not text:
@@ -267,15 +466,14 @@ class UniversalLegalParser:
                         "normalized": self._normalize_for_layout_match(text),
                         "bbox": block.get("bbox"),
                         "page_idx": page_idx,
+                        "page_size": page_size,
                     }
                 )
 
         return entries
 
     def _extract_layout_block_text(self, block: Dict[str, Any]) -> str:
-        """
-        Trích xuất text content từ một layout block (bao gồm cả nested blocks).
-        """
+        """Legacy: extract text from a layout block."""
         texts: List[str] = []
 
         for line in block.get("lines", []):
@@ -284,7 +482,6 @@ class UniversalLegalParser:
                 if content and span.get("type") == "text":
                     texts.append(content)
 
-        # Xử lý nested blocks (ví dụ: image blocks có chứa text)
         for child in block.get("blocks", []):
             child_text = self._extract_layout_block_text(child)
             if child_text:
@@ -292,55 +489,15 @@ class UniversalLegalParser:
 
         return " ".join(texts).strip()
 
-    def _normalize_for_layout_match(self, text: str) -> str:
-        """
-        Normalize text để so khớp giữa chunk content và layout block text.
-        Loại bỏ whitespace thừa, lowercase, bỏ dấu.
-        """
-        text = re.sub(r"\s+", " ", text).strip()
-        return self._fold_text(text)
-
-    def _assign_layout_info(
-        self,
-        chunks: List[ParsedChunk],
-        layout_entries: List[Dict[str, Any]],
-    ) -> None:
-        """
-        Match từng chunk với các layout entries dựa trên text content.
-        Gán bboxes và page_indices cho mỗi chunk.
-        """
-        for chunk in chunks:
-            chunk_normalized = self._normalize_for_layout_match(chunk.content)
-
-            if not chunk_normalized:
-                continue
-
-            matched_bboxes: List[List[int]] = []
-            matched_pages: set[int] = set()
-
-            for entry in layout_entries:
-                entry_text = entry["normalized"]
-
-                if not entry_text:
-                    continue
-
-                # Kiểm tra text của layout block có nằm trong chunk không
-                if entry_text in chunk_normalized:
-                    if entry["bbox"]:
-                        matched_bboxes.append(entry["bbox"])
-                    matched_pages.add(entry["page_idx"])
-
-            if matched_bboxes:
-                chunk.bboxes = matched_bboxes
-
-            if matched_pages:
-                chunk.page_indices = sorted(matched_pages)
-
     # ------------------------------------------------------------------
     # Split major blocks: Article / Appendix / Chapter / Section
     # ------------------------------------------------------------------
 
-    def _split_by_major_blocks(self, text: str) -> List[dict]:
+    def _split_by_major_blocks(
+        self,
+        text: str,
+        layout_index: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[dict]:
         lines = text.splitlines()
         blocks: List[dict] = []
 
@@ -354,7 +511,31 @@ class UniversalLegalParser:
         current_number: Optional[str] = None
         current_lines: List[str] = []
 
+        # Layout accumulators for the current block
+        current_bboxes: List[Dict[str, Any]] = []
+        current_page_sizes: Dict[int, Dict[str, float]] = {}
+        current_pages: set = set()
+
         inside_amendment_sequence = False
+
+        def _collect_for(stripped_line: str) -> None:
+            """Collect bbox/page_idx for a line into the current block's layout info."""
+            if layout_index is None or not stripped_line:
+                return
+            lf = self._normalize_for_layout_match(stripped_line)
+            for entry in self._lookup_layout_for_line(lf, layout_index):
+                page_idx = entry.get("page_idx")
+                if entry.get("bbox"):
+                    current_bboxes.append(
+                        {
+                            "bbox": entry["bbox"],
+                            "page_idx": page_idx,
+                        }
+                    )
+                if page_idx is not None:
+                    current_pages.add(page_idx)
+                    if entry.get("page_size") is not None:
+                        current_page_sizes[page_idx] = entry["page_size"]
 
         def flush() -> None:
             nonlocal current_kind
@@ -362,6 +543,9 @@ class UniversalLegalParser:
             nonlocal current_number
             nonlocal current_lines
             nonlocal inside_amendment_sequence
+            nonlocal current_bboxes
+            nonlocal current_page_sizes
+            nonlocal current_pages
 
             if not current_kind or not current_title:
                 return
@@ -369,23 +553,45 @@ class UniversalLegalParser:
             content = "\n".join(current_lines).strip()
 
             if content:
-                blocks.append(
-                    {
-                        "kind": current_kind,
-                        "title": current_title,
-                        "number": current_number,
-                        "content": content,
-                        "part_title": current_part,
-                        "chapter_title": current_chapter,
-                        "section_title": current_section,
-                        "appendix_title": current_appendix,
-                    }
-                )
+                block: dict = {
+                    "kind": current_kind,
+                    "title": current_title,
+                    "number": current_number,
+                    "content": content,
+                    "part_title": current_part,
+                    "chapter_title": current_chapter,
+                    "section_title": current_section,
+                    "appendix_title": current_appendix,
+                }
+
+                if current_bboxes:
+                    # Deduplicate by bbox + page_idx before storing.
+                    seen_b: set = set()
+                    deduped: List[Dict[str, Any]] = []
+                    for b in current_bboxes:
+                        bbox = b.get("bbox")
+                        page_idx = b.get("page_idx")
+                        k = (tuple(bbox) if bbox else None, page_idx)
+                        if k not in seen_b:
+                            seen_b.add(k)
+                            deduped.append(b)
+                    block["bboxes"] = deduped
+
+                if current_page_sizes:
+                    block["page_sizes"] = dict(sorted(current_page_sizes.items()))
+
+                if current_pages:
+                    block["page_indices"] = sorted(current_pages)
+
+                blocks.append(block)
 
             current_kind = None
             current_title = None
             current_number = None
             current_lines = []
+            current_bboxes = []
+            current_page_sizes = {}
+            current_pages = set()
             inside_amendment_sequence = False
 
         for raw_line in lines:
@@ -404,6 +610,10 @@ class UniversalLegalParser:
                 current_title = line
                 current_number = appendix_match.group(1)
                 current_lines = []
+                current_bboxes = []
+                current_page_sizes = {}
+                current_pages = set()
+                _collect_for(line)  # collect for appendix title line
                 continue
 
             part_match = self.PART_RE.match(line)
@@ -432,12 +642,14 @@ class UniversalLegalParser:
                 inside_amendment_sequence = True
                 if current_kind:
                     current_lines.append(line)
+                    _collect_for(line)
                 continue
 
             article_match = self.ARTICLE_RE.match(line)
             if article_match:
                 if inside_amendment_sequence and current_kind == "article":
                     current_lines.append(line)
+                    _collect_for(line)
                     continue
 
                 flush()
@@ -447,10 +659,15 @@ class UniversalLegalParser:
                 current_title = line
                 current_number = article_match.group(1).strip()
                 current_lines = []
+                current_bboxes = []
+                current_page_sizes = {}
+                current_pages = set()
+                _collect_for(line)  # collect for article title line
                 continue
 
             if current_kind:
                 current_lines.append(line)
+                _collect_for(line)
 
         flush()
         return blocks
@@ -477,6 +694,7 @@ class UniversalLegalParser:
                 parsed = self._parse_amendment_item(article, item)
                 if parsed:
                     chunks.append(parsed)
+            self._propagate_block_layout(block, chunks)
             return chunks
 
         free_form_amendments = self._split_free_form_amendments(article)
@@ -487,16 +705,22 @@ class UniversalLegalParser:
                 parsed = self._parse_amendment_item(article, item)
                 if parsed:
                     chunks.append(parsed)
+            self._propagate_block_layout(block, chunks)
             return chunks
 
         normal = self._parse_normal_article(article)
+        self._propagate_block_layout(block, [normal])
 
         if len(normal.content) <= self.max_chunk_chars:
             return [normal]
 
         clause_chunks = self._split_article_by_clauses(article)
 
-        return clause_chunks or [normal]
+        if clause_chunks:
+            self._propagate_block_layout(block, clause_chunks)
+            return clause_chunks
+
+        return [normal]
 
     def _split_article_by_clauses(self, article: dict) -> List[ParsedChunk]:
         items = self._split_by_heading_lines(
@@ -542,7 +766,7 @@ class UniversalLegalParser:
         )
 
         if not items:
-            return [
+            chunks = [
                 ParsedChunk(
                     chunk_kind="appendix",
                     title=appendix_title,
@@ -553,6 +777,8 @@ class UniversalLegalParser:
                     section_path=appendix_title,
                 )
             ]
+            self._propagate_block_layout(block, chunks)
+            return chunks
 
         chunks: List[ParsedChunk] = []
 
@@ -596,6 +822,7 @@ class UniversalLegalParser:
                 )
             )
 
+        self._propagate_block_layout(block, chunks)
         return chunks
 
     # ------------------------------------------------------------------
@@ -611,7 +838,7 @@ class UniversalLegalParser:
         )
 
         if not items:
-            return [
+            chunks = [
                 ParsedChunk(
                     chunk_kind="section",
                     title=block["title"],
@@ -622,6 +849,8 @@ class UniversalLegalParser:
                     section_path=block["title"],
                 )
             ]
+            self._propagate_block_layout(block, chunks)
+            return chunks
 
         chunks: List[ParsedChunk] = []
 
@@ -642,6 +871,7 @@ class UniversalLegalParser:
                 )
             )
 
+        self._propagate_block_layout(block, chunks)
         return chunks
 
     # ------------------------------------------------------------------

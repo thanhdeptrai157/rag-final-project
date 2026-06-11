@@ -31,11 +31,9 @@ class UniversalLegalChunker:
             title = self._build_title(item)
             section_path = self._build_section_path(item)
 
-            page_start = None
-            page_end = None
-            if item.page_indices:
-                page_start = min(item.page_indices) + 1
-                page_end = max(item.page_indices) + 1
+            page_indices = self._extract_page_indices(item)
+            page_start = min(page_indices) + 1 if page_indices else None
+            page_end = max(page_indices) + 1 if page_indices else None
 
             chunk = Chunk(
                 chunk_id=chunk_id,
@@ -139,9 +137,7 @@ class UniversalLegalChunker:
                 parts.append(f"Điều chứa nội dung sửa đổi: {item.article_title}")
 
             if item.target_article_number:
-                parts.append(
-                    f"Điều được tác động: Điều {item.target_article_number}"
-                )
+                parts.append(f"Điều được tác động: Điều {item.target_article_number}")
 
             if item.target_clause_text:
                 parts.append(f"Khoản được tác động: {item.target_clause_text}")
@@ -214,6 +210,10 @@ class UniversalLegalChunker:
     ) -> dict:
         document_metadata = document.metadata or {}
 
+        page_indices = self._extract_page_indices(item)
+        page_start = min(page_indices) + 1 if page_indices else None
+        page_end = max(page_indices) + 1 if page_indices else None
+
         metadata = {
             "source": document.source_path,
             "source_type": document.source_type,
@@ -251,10 +251,14 @@ class UniversalLegalChunker:
             "article_number": item.article_number,
             "heading_level": item.heading_level,
             "heading_number": item.heading_number,
+            # Each bbox item should contain its own page_idx, for example:
+            # {"bbox": [x1, y1, x2, y2], "page_idx": 0}
             "bboxes": item.bboxes,
-            "page_indices": item.page_indices,
-            "page_start": min(item.page_indices) + 1 if item.page_indices else None,
-            "page_end": max(item.page_indices) + 1 if item.page_indices else None,
+            "page_sizes": getattr(item, "page_sizes", None),
+            # Derived convenience fields for filtering/display.
+            "page_indices": page_indices,
+            "page_start": page_start,
+            "page_end": page_end,
         }
 
         if item.chunk_kind == "amendment":
@@ -289,6 +293,31 @@ class UniversalLegalChunker:
             )
 
         return metadata
+
+
+    def _extract_page_indices(self, item: ParsedChunk) -> List[int]:
+        """
+        Derive page indices from bboxes[*].page_idx.
+
+        page_indices is kept only as a backward-compatible fallback because
+        the canonical location is now inside each bbox item.
+        """
+        page_indices = {
+            bbox_item.get("page_idx")
+            for bbox_item in (item.bboxes or [])
+            if isinstance(bbox_item, dict)
+            and isinstance(bbox_item.get("page_idx"), int)
+        }
+
+        if page_indices:
+            return sorted(page_indices)
+
+        legacy_page_indices = getattr(item, "page_indices", None) or []
+        return sorted(
+            page_idx
+            for page_idx in legacy_page_indices
+            if isinstance(page_idx, int)
+        )
 
     def _resolve_version_number(self, document: Document) -> int | None:
         version_no = getattr(document, "version_no", None)

@@ -3,6 +3,20 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+from typing import Annotated
+
+
+from pydantic import BaseModel
+
+
+class BBoxInfo(BaseModel):
+    bbox: tuple[int, int, int, int]
+    page_idx: int
+
+
+class PageSize(BaseModel):
+    width: int
+    height: int
 
 
 class ChatRequest(BaseModel):
@@ -23,6 +37,11 @@ class SourceDocument(BaseModel):
     matched_query_count: int | None = None
     citation_id: int | None = None
     context: str | None = None
+    bboxes: list[BBoxInfo] | None = None
+    page_sizes: dict[int, PageSize] | None = None
+
+    page_start: int | None = None
+    page_end: int | None = None
 
 
 class ChatResponse(BaseModel):

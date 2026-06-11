@@ -93,6 +93,8 @@ class QueryPipeline:
                 """.strip())
 
             metadata = item.get("metadata") or {}
+            print("Metadata for item:", metadata)
+            print("item:", item)
             document_id = item.get("document_id")
 
             document_model = (
@@ -101,7 +103,7 @@ class QueryPipeline:
             latest_version = (
                 latest_version_map.get(str(document_id)) if document_id else None
             )
-
+    
             file_path = metadata.get("file_path") or (
                 latest_version.source_file_path if latest_version else None
             )
@@ -130,6 +132,12 @@ class QueryPipeline:
                     "mime_type": mime_type,
                     "score": item.get("score"),
                     "rerank_score": item.get("rerank_score"),
+                    "metadata": metadata,
+                    "bboxes": metadata.get("bboxes"),
+                    "page_start": metadata.get("page_start"),
+                    "page_end": metadata.get("page_end"),
+                    "page_indices": metadata.get("page_indices"),
+                    "page_sizes": metadata.get("page_sizes"),
                 }
             )
 
