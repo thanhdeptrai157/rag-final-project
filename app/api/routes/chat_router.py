@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import get_current_user
 from app.api.service.chat_service import ChatService
@@ -35,6 +36,21 @@ async def chat(
     service: ChatService = Depends(),
 ) -> ChatResponse:
     return service.answer(request.question)
+
+
+@chat_router.post("/stream")
+async def chat_stream(
+    request: ChatRequest,
+    service: ChatService = Depends(),
+) -> StreamingResponse:
+    return StreamingResponse(
+        service.stream_answer(request.question),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @chat_router.get("/sessions", response_model=list[ChatSessionListItem])
@@ -117,6 +133,27 @@ def send_message(
         current_user=current_user,
         session_id=session_id,
         payload=payload,
+    )
+
+
+@chat_router.post("/sessions/{session_id}/messages/stream")
+def send_message_stream(
+    session_id: UUID,
+    payload: ChatMessageCreate,
+    current_user: User = Depends(get_current_user),
+    service: ChatMessageService = Depends(),
+) -> StreamingResponse:
+    return StreamingResponse(
+        service.stream_send_message(
+            current_user=current_user,
+            session_id=session_id,
+            payload=payload,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

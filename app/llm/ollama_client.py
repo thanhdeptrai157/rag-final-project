@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 
 from ollama import Client
 
@@ -35,6 +36,27 @@ class OllamaClient:
     def generate_response(self, query: str, context: str) -> str:
         prompt = build_rag_prompt(query=query, context=context)
         return self._chat(prompt, temperature=0.3)
+
+    def stream_generate_response(self, query: str, context: str) -> Iterator[str]:
+        prompt = build_rag_prompt(query=query, context=context)
+        stream = self.client.chat(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            options={
+                "temperature": 0.3,
+            },
+            stream=True,
+        )
+
+        for chunk in stream:
+            content = (chunk.get("message") or {}).get("content")
+            if content:
+                yield content
 
     def generate_expand_query(self, query: str) -> list[str]:
         prompt = build_expand_query_prompt(query=query)

@@ -10,3 +10,5 @@ class ChatRepository:
     def answer_query(self, question: str, top_k: int = 1) -> dict:
         return self.rag_service.answer_query(query=question, top_k=top_k)
 
+    def stream_answer_query(self, question: str, top_k: int = 1):
+        yield from self.rag_service.stream_answer_query(query=question, top_k=top_k)

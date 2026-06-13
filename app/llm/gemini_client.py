@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 
 from google import genai
 from app.core.config import Config
@@ -23,6 +24,26 @@ class GeminiClient:
             },
         )
         return response.text
+
+    def stream_generate_response(self, query: str, context: str) -> Iterator[str]:
+        prompt = build_rag_prompt(query=query, context=context)
+
+        if not hasattr(self.client.models, "generate_content_stream"):
+            yield self.generate_response(query=query, context=context)
+            return
+
+        stream = self.client.models.generate_content_stream(
+            model="gemma-4-31b-it",
+            contents=prompt,
+            config={
+                "temperature": 0.5,
+            },
+        )
+
+        for chunk in stream:
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text
 
     def generate_expand_query(self, query: str) -> list[str]:
         prompt = build_expand_query_prompt(query=query)

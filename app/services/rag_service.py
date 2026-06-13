@@ -31,6 +31,9 @@ class RagService:
     def answer_query(self, query: str, top_k: int = 1) -> dict:
         return self.query_pipeline.run(query=query, top_k=top_k)
 
+    def stream_answer_query(self, query: str, top_k: int = 1):
+        yield from self.query_pipeline.stream(query=query, top_k=top_k)
+
     def _normalize_expanded_queries(
         self, query: str, expanded_queries: list[str] | None
     ) -> list[str]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.repositories.chat_repository import ChatRepository
+from app.api.service.chat_service import format_sse
 from app.core.database import get_db
 from app.models.chat import (
     ChatMessage,
@@ -259,6 +261,136 @@ class ChatMessageService:
             user_message=ChatMessageOut.model_validate(user_message),
             assistant_message=assistant_out,
             rag_trace=MessageRagTraceOut.model_validate(rag_trace),
+        )
+
+    def stream_send_message(
+        self, *, current_user: User, session_id: UUID, payload: ChatMessageCreate
+    ) -> Iterator[str]:
+        session = self.session_service.require_owned_session(session_id, current_user)
+        content = payload.content.strip()
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Message content is required",
+            )
+
+        return self._stream_send_message_events(
+            current_user=current_user,
+            session=session,
+            content=content,
+        )
+
+    def _stream_send_message_events(
+        self, *, current_user: User, session: ChatSession, content: str
+    ) -> Iterator[str]:
+        user_message = ChatMessage(
+            session_id=session.id,
+            role="user",
+            content=content,
+        )
+        self.db.add(user_message)
+        self.db.flush()
+        yield format_sse(
+            {
+                "type": "message_saved",
+                "role": "user",
+                "user_message": ChatMessageOut.model_validate(user_message).model_dump(
+                    mode="json"
+                ),
+            }
+        )
+
+        start = _utcnow()
+        answer_parts = []
+        final_result = {
+            "answer": "",
+            "sources": [],
+            "route": None,
+        }
+
+        try:
+            for event in self.chat_repo.stream_answer_query(question=content, top_k=3):
+                event_type = event.get("type")
+
+                if event_type == "answer_delta":
+                    answer_parts.append(str(event.get("delta") or ""))
+                    yield format_sse(event)
+                    continue
+
+                if event_type == "done":
+                    final_result = event
+                    continue
+
+                yield format_sse(event)
+        except Exception as exc:
+            final_result = {
+                "answer": f"Error processing request: {str(exc)}",
+                "sources": [],
+                "route": "fallback",
+            }
+            yield format_sse(
+                {
+                    "type": "error",
+                    "message": final_result["answer"],
+                }
+            )
+
+        latency_ms = int((_utcnow() - start).total_seconds() * 1000)
+        answer = str(final_result.get("answer") or "".join(answer_parts))
+        sources = _json_list(final_result.get("sources"))
+
+        assistant_message = ChatMessage(
+            session_id=session.id,
+            role="assistant",
+            content=answer,
+        )
+        self.db.add(assistant_message)
+        self.db.flush()
+
+        rag_trace = MessageRagTrace(
+            message_id=assistant_message.id,
+            route=final_result.get("route"),
+            latency_ms=latency_ms,
+            model_name=self._model_name(),
+            retrieved_contexts=sources,
+            citations=_json_list(final_result.get("citations") or sources),
+        )
+        self.db.add(rag_trace)
+
+        now = _utcnow()
+        if not session.title:
+            session.title = self._generate_title(content)
+        session.updated_at = now
+        self.db.commit()
+        self.db.refresh(user_message)
+        self.db.refresh(assistant_message)
+        self.db.refresh(rag_trace)
+
+        assistant_out = self._to_message_with_feedback(assistant_message, current_user)
+        yield format_sse(
+            {
+                "type": "message_saved",
+                "role": "assistant",
+                "assistant_message": assistant_out.model_dump(mode="json"),
+                "rag_trace": MessageRagTraceOut.model_validate(rag_trace).model_dump(
+                    mode="json"
+                ),
+            }
+        )
+        yield format_sse(
+            {
+                "type": "done",
+                "answer": assistant_out.content,
+                "sources": sources,
+                "route": final_result.get("route"),
+                "user_message": ChatMessageOut.model_validate(user_message).model_dump(
+                    mode="json"
+                ),
+                "assistant_message": assistant_out.model_dump(mode="json"),
+                "rag_trace": MessageRagTraceOut.model_validate(rag_trace).model_dump(
+                    mode="json"
+                ),
+            }
         )
 
     def _to_message_with_feedback(
