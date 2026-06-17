@@ -132,8 +132,13 @@ class UniversalLegalParser:
         re.I,
     )
 
-    def __init__(self, max_chunk_chars: int = 4500) -> None:
+    def __init__(
+        self,
+        max_chunk_chars: int = 4500,
+        min_section_chunk_chars: int = 900,
+    ) -> None:
         self.max_chunk_chars = max_chunk_chars
+        self.min_section_chunk_chars = min_section_chunk_chars
 
     def _break_trailing_numbered_heading(self, text: str) -> str:
         fixed_lines = []
@@ -212,19 +217,26 @@ class UniversalLegalParser:
 
             return self._post_process(chunks)
 
-        section_chunks = self._parse_by_numbered_headings(text)
+        section_chunks = self._parse_by_numbered_headings(
+            text,
+            layout_index=layout_index,
+        )
 
         if section_chunks:
             return self._post_process(section_chunks)
 
+        fallback = ParsedChunk(
+            chunk_kind="unknown",
+            title=self._extract_fallback_title(text),
+            content=text.strip(),
+        )
+        self._apply_layout_payload(
+            fallback,
+            self._layout_payload_for_lines(text.splitlines(), layout_index),
+        )
+
         return self._post_process(
-            [
-                ParsedChunk(
-                    chunk_kind="unknown",
-                    title=self._extract_fallback_title(text),
-                    content=text.strip(),
-                )
-            ]
+            [fallback]
         )
 
     def parse_with_layout(
@@ -439,6 +451,70 @@ class UniversalLegalParser:
                 chunk.page_sizes = page_sizes
             if page_indices is not None and chunk.page_indices is None:
                 chunk.page_indices = page_indices
+
+    def _layout_payload_for_lines(
+        self,
+        lines: List[str],
+        layout_index: Optional[List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        """
+        Build layout payload for fallback parsers that split by headings rather
+        than major legal blocks. This keeps _split_by_major_blocks unchanged.
+        """
+        if not layout_index:
+            return {}
+
+        bboxes: List[Dict[str, Any]] = []
+        page_sizes: Dict[int, Dict[str, float]] = {}
+        page_indices: set[int] = set()
+        seen: set = set()
+
+        for raw_line in lines:
+            line = self._strip_md_heading(raw_line.strip())
+            if not line or self._is_page_number(line):
+                continue
+
+            folded = self._normalize_for_layout_match(line)
+            for entry in self._lookup_layout_for_line(folded, layout_index):
+                page_idx = entry.get("page_idx")
+                bbox = entry.get("bbox")
+
+                if bbox:
+                    key = (tuple(bbox), page_idx)
+                    if key not in seen:
+                        seen.add(key)
+                        bboxes.append(
+                            {
+                                "bbox": bbox,
+                                "page_idx": page_idx,
+                            }
+                        )
+
+                if isinstance(page_idx, int):
+                    page_indices.add(page_idx)
+                    if entry.get("page_size") is not None:
+                        page_sizes[page_idx] = entry["page_size"]
+
+        payload: Dict[str, Any] = {}
+        if bboxes:
+            payload["bboxes"] = bboxes
+        if page_sizes:
+            payload["page_sizes"] = dict(sorted(page_sizes.items()))
+        if page_indices:
+            payload["page_indices"] = sorted(page_indices)
+        return payload
+
+    def _apply_layout_payload(
+        self,
+        chunk: ParsedChunk,
+        payload: Dict[str, Any],
+    ) -> None:
+        if not payload:
+            return
+
+        chunk.bboxes = payload.get("bboxes")
+        chunk.page_sizes = payload.get("page_sizes")
+        chunk.page_indices = payload.get("page_indices")
 
     # ------------------------------------------------------------------
     # Legacy layout helpers (kept for backward compatibility)
@@ -879,7 +955,10 @@ class UniversalLegalParser:
     # ------------------------------------------------------------------
 
     def _split_by_heading_lines(
-        self, text: str, allowed: tuple[str, ...]
+        self,
+        text: str,
+        allowed: tuple[str, ...],
+        layout_index: Optional[List[Dict[str, Any]]] = None,
     ) -> List[dict]:
         lines = text.splitlines()
         items: List[dict] = []
@@ -890,27 +969,41 @@ class UniversalLegalParser:
         current_lines: List[str] = []
 
         preface_lines: List[str] = []
+        preface_consumed = False
 
         def flush() -> None:
             nonlocal current_title
             nonlocal current_number
             nonlocal current_level
             nonlocal current_lines
+            nonlocal preface_consumed
 
             if not current_title:
                 return
 
-            content = "\n".join(preface_lines + current_lines).strip()
+            content_lines: List[str] = []
+            if not preface_consumed:
+                content_lines.extend(preface_lines)
+                preface_consumed = True
+            content_lines.extend(current_lines)
+            content = "\n".join(content_lines).strip()
+            if not content:
+                content = current_title
 
             if content:
-                items.append(
-                    {
-                        "title": current_title,
-                        "number": current_number,
-                        "level": current_level,
-                        "content": content,
-                    }
+                item = {
+                    "title": current_title,
+                    "number": current_number,
+                    "level": current_level,
+                    "content": content,
+                }
+                item.update(
+                    self._layout_payload_for_lines(
+                        [current_title] + content_lines,
+                        layout_index,
+                    )
                 )
+                items.append(item)
 
             current_title = None
             current_number = None
@@ -950,7 +1043,7 @@ class UniversalLegalParser:
 
     def _detect_inner_heading(self, line: str) -> Optional[dict]:
         roman = self.ROMAN_HEADING_RE.match(line)
-        if roman and self._looks_like_real_heading(line):
+        if roman and roman.group(1).isupper() and self._looks_like_real_heading(line):
             return {
                 "kind": "roman",
                 "number": roman.group(1),
@@ -981,7 +1074,7 @@ class UniversalLegalParser:
                 return {
                     "kind": "numbered",
                     "number": number,
-                    "level": len(number.split(".")),
+                    "level": len(number.split(".")) + 1,
                 }
 
             return {
@@ -1004,6 +1097,31 @@ class UniversalLegalParser:
         if kind in {"clause", "numbered"}:
             if re.match(r"^\d+\.\s*$", line):
                 return True
+
+            numbered = self.NUMBERED_HEADING_RE.match(line)
+            if numbered:
+                raw_number = numbered.group(1).strip()
+                has_numbering_dot = raw_number.endswith(".") or bool(
+                    re.match(r"^\s*\d+\.", line)
+                )
+
+                if raw_number.isdigit() and not has_numbering_dot:
+                    number = int(raw_number)
+                    folded = self._fold_text(line)
+                    address_words = (
+                        "duong",
+                        "phuong",
+                        "quan",
+                        "huyen",
+                        "tinh",
+                        "thanh pho",
+                        "nguyen",
+                        "tran",
+                        "le ",
+                    )
+
+                    if number > 20 or any(word in folded for word in address_words):
+                        return True
 
         return False
 
@@ -1215,10 +1333,15 @@ class UniversalLegalParser:
     # Fallback numbered heading parser
     # ------------------------------------------------------------------
 
-    def _parse_by_numbered_headings(self, text: str) -> List[ParsedChunk]:
+    def _parse_by_numbered_headings(
+        self,
+        text: str,
+        layout_index: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[ParsedChunk]:
         items = self._split_by_heading_lines(
             text,
             allowed=("roman", "numbered", "clause"),
+            layout_index=layout_index,
         )
 
         chunks: List[ParsedChunk] = []
@@ -1232,6 +1355,9 @@ class UniversalLegalParser:
                     heading_level=item.get("level"),
                     heading_number=item.get("number"),
                     section_path=item["title"],
+                    bboxes=item.get("bboxes"),
+                    page_sizes=item.get("page_sizes"),
+                    page_indices=item.get("page_indices"),
                 )
             )
 
@@ -1614,4 +1740,135 @@ class UniversalLegalParser:
 
             cleaned.append(chunk)
 
-        return cleaned
+        return self._merge_small_section_chunks(cleaned)
+
+    def _merge_small_section_chunks(
+        self, chunks: List[ParsedChunk]
+    ) -> List[ParsedChunk]:
+        if self.min_section_chunk_chars <= 0:
+            return chunks
+
+        merged: List[ParsedChunk] = []
+        pending: Optional[ParsedChunk] = None
+
+        def flush_pending() -> None:
+            nonlocal pending
+            if pending is not None:
+                merged.append(pending)
+                pending = None
+
+        for chunk in chunks:
+            if chunk.chunk_kind != "section":
+                flush_pending()
+                merged.append(chunk)
+                continue
+
+            if pending is None:
+                pending = chunk
+                continue
+
+            if self._should_merge_section_chunks(pending, chunk):
+                pending = self._combine_section_chunks(pending, chunk)
+                continue
+
+            flush_pending()
+            pending = chunk
+
+        flush_pending()
+        return merged
+
+    def _should_merge_section_chunks(
+        self,
+        left: ParsedChunk,
+        right: ParsedChunk,
+    ) -> bool:
+        if left.chunk_kind != "section" or right.chunk_kind != "section":
+            return False
+
+        if right.heading_level == 1:
+            return False
+
+        if (
+            left.heading_level is not None
+            and right.heading_level is not None
+            and right.heading_level < left.heading_level
+        ):
+            return False
+
+        combined_len = len(left.content) + len(right.content) + len(right.title) + 2
+        if combined_len > self.max_chunk_chars:
+            return False
+
+        return len(left.content) < self.min_section_chunk_chars
+
+    def _combine_section_chunks(
+        self,
+        left: ParsedChunk,
+        right: ParsedChunk,
+    ) -> ParsedChunk:
+        right_content = self._content_with_title(right)
+        left.content = self._normalize_content(
+            "\n\n".join(part for part in [left.content, right_content] if part)
+        )
+
+        if left.section_path and right.section_path:
+            left.section_path = f"{left.section_path} > {right.section_path}"
+        elif right.section_path:
+            left.section_path = right.section_path
+
+        left.bboxes = self._merge_bboxes(left.bboxes, right.bboxes)
+        left.page_sizes = self._merge_page_sizes(left.page_sizes, right.page_sizes)
+        left.page_indices = self._merge_page_indices(
+            left.page_indices,
+            right.page_indices,
+        )
+
+        return left
+
+    def _content_with_title(self, chunk: ParsedChunk) -> str:
+        return self._normalize_content(
+            "\n".join(part for part in [chunk.title, chunk.content] if part)
+        )
+
+    def _merge_bboxes(
+        self,
+        left: Optional[List[Dict[str, Any]]],
+        right: Optional[List[Dict[str, Any]]],
+    ) -> Optional[List[Dict[str, Any]]]:
+        if not left and not right:
+            return None
+
+        merged: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        for item in (left or []) + (right or []):
+            bbox = item.get("bbox")
+            page_idx = item.get("page_idx")
+            key = (tuple(bbox) if bbox else None, page_idx)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+
+        return merged
+
+    def _merge_page_sizes(
+        self,
+        left: Optional[Dict[int, Dict[str, float]]],
+        right: Optional[Dict[int, Dict[str, float]]],
+    ) -> Optional[Dict[int, Dict[str, float]]]:
+        if not left and not right:
+            return None
+
+        merged = dict(left or {})
+        merged.update(right or {})
+        return dict(sorted(merged.items()))
+
+    def _merge_page_indices(
+        self,
+        left: Optional[List[int]],
+        right: Optional[List[int]],
+    ) -> Optional[List[int]]:
+        if not left and not right:
+            return None
+        return sorted(set(left or []) | set(right or []))

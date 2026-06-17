@@ -1,5 +1,43 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+TIMEZONE = "Asia/Ho_Chi_Minh"
+
+
+def build_current_time_context() -> str:
+    now = datetime.now(ZoneInfo(TIMEZONE))
+
+    return f"""
+========================
+THÔNG TIN THỜI GIAN HỆ THỐNG
+========================
+
+Ngày hiện tại: {now.strftime("%d/%m/%Y")}
+Giờ hiện tại: {now.strftime("%H:%M:%S")}
+Múi giờ: {TIMEZONE}
+Tháng hiện tại: {now.month}
+Năm hiện tại: {now.year}
+
+Khi người dùng sử dụng các cụm từ như:
+- hôm nay
+- hiện tại
+- hiện nay
+- năm nay
+- tháng này
+- tuần này
+- gần đây
+- mới nhất
+
+hãy diễn giải dựa trên thời gian hệ thống ở trên.
+""".strip()
+
+
 def build_rag_prompt(query: str, context: str) -> str:
+    time_context = build_current_time_context()
+
     prompt = f"""
+{time_context}
+
 Bạn là trợ lý trả lời câu hỏi dựa trên thông tin được cung cấp.
 
 [CONTEXT]
@@ -132,9 +170,9 @@ YÊU CẦU CHUNG
 
 - Chỉ trả lời dựa trên context đã cho.
 - Không sử dụng kiến thức bên ngoài.
-- Nếu context không chứa đủ thông tin để trả lời, trả lời:
-
-Không đủ thông tin.
+- Nếu context không chứa đủ thông tin để trả lời, hãy:
+    - Trả lời bằng giọng văn minh, lịch sự, chuyên nghiệp.
+    - Nói rõ trong context không có đủ thông tin để trả lời câu hỏi và tại sao (chưa có data, thiếu điều khoản liên quan, v.v.)
 
 - Không được bịa đặt.
 - Không được suy diễn vượt quá context.
@@ -193,32 +231,87 @@ YÊU CẦU TRẢ LỜI
 - Chỉ xuất ra câu trả lời cuối cùng.
 - Không hiển thị các bước suy luận.
 - Không giải thích cách suy luận.
+"""
+    return prompt.strip()
 
+
+def build_low_context_response_prompt(query: str) -> str:
+    time_context = build_current_time_context()
+
+    prompt = f"""
+{time_context}
+
+Bạn là chatbot hỗ trợ thông tin cho Trường Đại học Bách khoa - Đại học Đà Nẵng (DUT).
+
+[TIN NHẮN NGƯỜI DÙNG]
+{query}
+[/TIN NHẮN NGƯỜI DÙNG]
+
+Nhiệm vụ:
+Tạo câu trả lời phù hợp khi tin nhắn không đủ ngữ cảnh để truy xuất tài liệu RAG.
+
+Quy tắc phân loại và trả lời:
+
+1. Nếu tin nhắn là chào hỏi, cảm ơn, giới thiệu, hỏi bạn là ai, hoặc tương tác xã giao:
+   - Trả lời văn minh, thân thiện, ngắn gọn.
+   - Giới thiệu bạn là chatbot của DUT.
+   - Nói rõ bạn có thể hỗ trợ các câu hỏi liên quan đến học vụ, quy định, quy chế, văn bản, hoặc chương trình đào tạo các ngành.
+   - Gợi ý người dùng đặt câu hỏi cụ thể hơn.
+
+2. Nếu tin nhắn có nội dung kém văn minh, hăm dọa, chửi bới, xúc phạm, nói tục, quấy rối, hoặc yêu cầu gây hại:
+   - Trả lời lịch sự nhưng dứt khoát rằng bạn không thể hỗ trợ nội dung như vậy.
+   - Không lặp lại từ ngữ thô tục của người dùng.
+   - Có thể mời người dùng đặt lại câu hỏi theo hướng lịch sự và liên quan đến học vụ, quy định, hoặc chương trình đào tạo.
+
+3. Nếu tin nhắn quá ngắn, mơ hồ, hoặc không liên quan đến phạm vi DUT:
+   - Nói rằng bạn chưa đủ thông tin hoặc nội dung nằm ngoài phạm vi hỗ trợ.
+   - Gợi ý người dùng hỏi cụ thể về học vụ, quy định, quy chế, văn bản, hoặc chương trình đào tạo các ngành.
+
+Yêu cầu bắt buộc:
+- Trả lời bằng tiếng Việt.
+- Giọng văn lịch sự, chuyên nghiệp, không phán xét.
+- Không bịa thông tin.
+- Không dùng citation vì không có nguồn tài liệu được truy xuất.
+- Chỉ xuất ra câu trả lời cuối cùng, không giải thích phân loại.
+- Độ dài tối đa 4 câu.
 """
     return prompt.strip()
 
 
 def build_expand_query_prompt(query: str) -> str:
+    time_context = build_current_time_context()
+
     prompt = f"""
-    Bạn là trợ lý mở rộng câu hỏi cho hệ thống RAG. Nhiệm vụ của bạn là mở rộng câu hỏi đầu vào để nó trở nên chi tiết và cụ thể hơn, giúp hệ thống RAG có thể tìm kiếm thông tin chính xác hơn.
-    Nhiệm vụ của bạn là: 
-    Từ câu hỏi người dùng, hãy tạo 3-5 truy vấn tìm kiếm để lấy đúng điều khoản liên quan.
-    Quy tắc:
-    1. Không trả lời câu hỏi
-    2. Không suy luận kết luận cuối cùng
-    3. Giữ lại các thực thể quan trọng: loại quy định, đối tượng áp dụng, điểm số, thời gian, địa điểm, mốc thời gian, v.v.
-    4. Bổ sung các từ đồng nghĩa và cách diễn đạt trong văn bản pháp quy để tăng khả năng tìm kiếm trúng đích.
-    5. Nếu câu hỏi có số liệu/điều kiện, tạo thêm truy vấn tìm "điều kiện", "tiêu chuẩn", "mức", "xét", "quy định".
-    6. Trả về JSON array string, mỗi phần tử là một truy vấn tìm kiếm đã được mở rộng. Dạng trả về: ["truy vấn 1", "truy vấn 2", ...] không được có ```json hoặc bất kỳ định dạng nào khác, chỉ trả về đúng JSON array string.  
-    7. Trả lời bằng tiếng Việt.
-    
-    Câu hỏi cần mở rộng: {query}
-    """
+{time_context}
+
+Bạn là trợ lý mở rộng câu hỏi cho hệ thống RAG.
+
+Nhiệm vụ của bạn là:
+Từ câu hỏi người dùng, hãy tạo 3-5 truy vấn tìm kiếm để lấy đúng điều khoản liên quan.
+
+Quy tắc:
+1. Không trả lời câu hỏi.
+2. Không suy luận kết luận cuối cùng.
+3. Giữ lại các thực thể quan trọng: loại quy định, đối tượng áp dụng, điểm số, thời gian, địa điểm, mốc thời gian, v.v.
+4. Bổ sung các từ đồng nghĩa và cách diễn đạt trong văn bản pháp quy để tăng khả năng tìm kiếm trúng đích.
+5. Nếu câu hỏi có số liệu/điều kiện, tạo thêm truy vấn tìm "điều kiện", "tiêu chuẩn", "mức", "xét", "quy định".
+6. Nếu câu hỏi có từ chỉ thời gian tương đối như "hiện tại", "hiện nay", "năm nay", "tháng này", hãy mở rộng bằng năm/tháng/ngày hiện tại từ THÔNG TIN THỜI GIAN HỆ THỐNG.
+7. Trả về JSON array string, mỗi phần tử là một truy vấn tìm kiếm đã được mở rộng.
+8. Không được có ```json hoặc bất kỳ định dạng nào khác.
+9. Chỉ trả về đúng JSON array string.
+10. Trả lời bằng tiếng Việt.
+
+Câu hỏi cần mở rộng: {query}
+"""
     return prompt.strip()
 
 
 def build_route_query_prompt(query: str) -> str:
+    time_context = build_current_time_context()
+
     prompt = f"""
+{time_context}
+
 Bạn là bộ định tuyến truy vấn cho hệ thống RAG tài liệu của trường đại học bách khoa.
 Nhiệm vụ: nhận diện intent truy vấn và trả về đúng một JSON object.
 
@@ -237,6 +330,7 @@ Quy tắc:
 5. confidence nằm trong khoảng 0 đến 1.
 6. Không chọn appendix_lookup chỉ vì câu hỏi có từ điểm, ngành, năm, bảng điểm, điểm chuẩn.
 7. Các câu hỏi về điểm chuẩn, điểm tốt nghiệp, xếp loại, ngành tuyển sinh, năm tuyển sinh => broad_semantic_rag, trừ khi có nhắc rõ phụ lục/bảng quy đổi/khung năng lực.
+8. Nếu câu hỏi có thời gian tương đối như "hiện tại", "hiện nay", "năm nay", "tháng này", vẫn định tuyến theo nội dung chính của câu hỏi, nhưng hiểu thời gian dựa trên THÔNG TIN THỜI GIAN HỆ THỐNG.
 
 Schema:
 {{

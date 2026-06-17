@@ -2,8 +2,7 @@ import re
 import unicodedata
 from uuid import UUID
 
-from rapidfuzz import fuzz
-
+from app.core.config import Config
 from app.core.database import SessionLocal
 from app.llm.gemini_client import GeminiClient
 from app.llm.ollama_client import OllamaClient
@@ -11,6 +10,7 @@ from app.models.document import Document
 from app.models.chunk import Chunk as ChunkModel
 from app.models.document_version import DocumentVersion
 from app.pipeline.query_pipeline import QueryPipeline
+from app.retrieval.cross_encoder_reranker import get_cross_encoder_reranker
 from app.retrieval.retriever import Retriever
 from app.services.storage.r2_storage import R2Storage
 
@@ -63,72 +63,42 @@ class RagService:
         results: list[dict],
         top_k: int,
     ) -> list[dict]:
-        grouped = {}
+        if not results:
+            return []
 
-        for item in results:
-            key = self._result_key(item)
-            score = self._safe_float(item.get("score"))
+        if not Config.RERANKER_ENABLED:
+            return self._fallback_vector_rerank(results=results, top_k=top_k)
 
-            if key not in grouped:
-                grouped[key] = {
-                    "item": dict(item),
-                    "max_score": score,
-                    "matched_queries": set(),
-                    "matched_original_query": False,
-                    "best_query_index": item.get("retrieval_query_index", 999),
-                }
-
-            group = grouped[key]
-            if score > group["max_score"]:
-                group["item"] = dict(item)
-                group["max_score"] = score
-
-            query_index = item.get("retrieval_query_index")
-            retrieval_query = item.get("retrieval_query")
-            if retrieval_query:
-                group["matched_queries"].add(self._fold_text(str(retrieval_query)))
-
-            if query_index == 0:
-                group["matched_original_query"] = True
-
-            if isinstance(query_index, int):
-                group["best_query_index"] = min(group["best_query_index"], query_index)
-
-        reranked = []
-        query_count = max(len(expanded_queries), 1)
-        for group in grouped.values():
-            item = group["item"]
-            vector_score = group["max_score"]
-            lexical_score = self._lexical_score(query=query, item=item)
-            metadata_bonus = self._metadata_bonus(query=query, item=item)
-            multi_query_bonus = min(
-                len(group["matched_queries"]) / query_count,
-                1.0,
+        try:
+            reranker = get_cross_encoder_reranker()
+            reranked = reranker.rerank(
+                query=query,
+                results=results,
+                top_k=top_k,
             )
-            original_query_bonus = 1.0 if group["matched_original_query"] else 0.0
-
-            rerank_score = (
-                0.75 * vector_score
-                + 0.12 * lexical_score
-                + 0.06 * multi_query_bonus
-                + 0.04 * original_query_bonus
-                + metadata_bonus
+            for item in reranked:
+                item["rerank_model"] = reranker.model_name
+            return reranked
+        except Exception as exc:
+            print(
+                "[RERANK] Cross-encoder rerank failed, falling back to vector score: "
+                f"{type(exc).__name__}: {exc}"
             )
+            return self._fallback_vector_rerank(results=results, top_k=top_k)
 
-            item["score"] = vector_score
-            item["rerank_score"] = rerank_score
-            item["lexical_score"] = lexical_score
-            item["matched_query_count"] = len(group["matched_queries"])
-            reranked.append(item)
-
-        reranked.sort(
-            key=lambda item: (
-                item.get("rerank_score", 0.0),
-                item.get("score", 0.0),
-            ),
+    def _fallback_vector_rerank(self, results: list[dict], top_k: int) -> list[dict]:
+        unique_results = self._deduplicate_results(results)
+        unique_results.sort(
+            key=lambda item: self._safe_float(item.get("score")),
             reverse=True,
         )
-        return reranked[:top_k]
+
+        for item in unique_results[:top_k]:
+            vector_score = self._safe_float(item.get("score"))
+            item["rerank_score"] = vector_score
+            item["rerank_model"] = "vector_score_fallback"
+
+        return unique_results[:top_k]
 
     def _deduplicate_results(self, results: list[dict]) -> list[dict]:
         seen = set()
@@ -165,92 +135,6 @@ class RagService:
             )
 
         return str(chunk_id)
-
-    def _lexical_score(self, query: str, item: dict) -> float:
-        title = item.get("title") or ""
-        section_path = item.get("section_path") or ""
-        text = item.get("text") or ""
-        metadata = item.get("metadata") or {}
-
-        haystack = "\n".join(
-            [
-                str(title),
-                str(section_path),
-                str(metadata.get("doc_title") or ""),
-                str(metadata.get("article_title") or ""),
-                str(metadata.get("article_number") or ""),
-                str(text[:4000]),
-            ]
-        )
-
-        query_folded = self._fold_text(query)
-        haystack_folded = self._fold_text(haystack)
-        if not query_folded or not haystack_folded:
-            return 0.0
-
-        fuzzy_score = fuzz.token_set_ratio(query_folded, haystack_folded) / 100
-        phrase_bonus = self._legal_phrase_bonus(query_folded, haystack_folded)
-        return min(fuzzy_score + phrase_bonus, 1.0)
-
-    def _legal_phrase_bonus(self, query: str, haystack: str) -> float:
-        patterns = [
-            r"\bdieu\s+[a-z0-9ivxlcdm]+\b",
-            r"\bkhoan\s+[a-z0-9ivxlcdm]+\b",
-            r"\bdiem\s+[a-z0-9ivxlcdm]+\b",
-            r"\bchuong\s+[a-z0-9ivxlcdm]+\b",
-            r"\bmuc\s+[a-z0-9ivxlcdm]+\b",
-            r"\bphu luc\s+[a-z0-9ivxlcdm]+\b",
-        ]
-
-        bonus = 0.0
-        for pattern in patterns:
-            for phrase in set(re.findall(pattern, query)):
-                if phrase in haystack:
-                    bonus += 0.04
-
-        numeric_terms = set(re.findall(r"\b\d{2,4}\b", query))
-        for term in numeric_terms:
-            if term in haystack:
-                bonus += 0.02
-
-        return min(bonus, 0.15)
-
-    def _metadata_bonus(self, query: str, item: dict) -> float:
-        metadata = item.get("metadata") or {}
-        query_folded = self._fold_text(query)
-        bonus = 0.0
-
-        if metadata.get("is_current") is True:
-            bonus += 0.03
-
-        status = self._fold_text(str(metadata.get("status") or ""))
-        if status in {"active", "processed"}:
-            bonus += 0.02
-        elif status in {"inactive", "deleted", "removed", "archived"}:
-            bonus -= 0.04
-
-        is_amendment = metadata.get("is_amendment") is True
-        amendment_intent = any(
-            phrase in query_folded
-            for phrase in (
-                "sua doi",
-                "bo sung",
-                "bai bo",
-                "thay doi",
-                "van ban moi",
-                "hien hanh",
-            )
-        )
-        if is_amendment and amendment_intent:
-            bonus += 0.03
-
-        article_number = metadata.get("article_number") or metadata.get(
-            "target_article_number"
-        )
-        if article_number and self._fold_text(str(article_number)) in query_folded:
-            bonus += 0.02
-
-        return bonus
 
     def _fold_text(self, text: str) -> str:
         normalized = unicodedata.normalize("NFD", str(text).lower())

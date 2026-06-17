@@ -18,6 +18,28 @@ class Config:
     QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "regulations")
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 800))
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 150))
+    RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+    RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    RERANKER_CACHE_DIR = os.getenv(
+        "RERANKER_CACHE_DIR",
+        os.path.join(os.getenv("HF_HOME", "/app/.cache/huggingface"), "reranker"),
+    )
+    RERANKER_LOCAL_FILES_ONLY = os.getenv(
+        "RERANKER_LOCAL_FILES_ONLY", "false"
+    ).lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    RERANKER_BATCH_SIZE = int(os.getenv("RERANKER_BATCH_SIZE", "8"))
+    RERANKER_MAX_LENGTH = int(os.getenv("RERANKER_MAX_LENGTH", "1024"))
+    RERANKER_MAX_CANDIDATES = int(os.getenv("RERANKER_MAX_CANDIDATES", "30"))
     PDF_OCR_PROVIDER = os.getenv("PDF_OCR_PROVIDER", "paddle").lower()
 
     DATABASE_URL = os.getenv("DATABASE_URL")

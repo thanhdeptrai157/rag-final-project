@@ -6,6 +6,7 @@ from ollama import Client
 from app.core.config import Config
 from app.llm.prompt_builder import (
     build_expand_query_prompt,
+    build_low_context_response_prompt,
     build_rag_prompt,
     build_route_query_prompt,
 )
@@ -49,6 +50,31 @@ class OllamaClient:
             ],
             options={
                 "temperature": 0.3,
+            },
+            stream=True,
+        )
+
+        for chunk in stream:
+            content = (chunk.get("message") or {}).get("content")
+            if content:
+                yield content
+
+    def generate_low_context_response(self, query: str) -> str:
+        prompt = build_low_context_response_prompt(query=query)
+        return self._chat(prompt, temperature=0.2)
+
+    def stream_low_context_response(self, query: str) -> Iterator[str]:
+        prompt = build_low_context_response_prompt(query=query)
+        stream = self.client.chat(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            options={
+                "temperature": 0.2,
             },
             stream=True,
         )

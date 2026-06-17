@@ -18,3 +18,7 @@ docs/
 test.py
 
 output/
+
+
+test
+.cache

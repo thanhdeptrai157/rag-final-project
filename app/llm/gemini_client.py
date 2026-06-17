@@ -5,6 +5,7 @@ from google import genai
 from app.core.config import Config
 from app.llm.prompt_builder import (
     build_expand_query_prompt,
+    build_low_context_response_prompt,
     build_rag_prompt,
     build_route_query_prompt,
 )
@@ -37,6 +38,37 @@ class GeminiClient:
             contents=prompt,
             config={
                 "temperature": 0.5,
+            },
+        )
+
+        for chunk in stream:
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text
+
+    def generate_low_context_response(self, query: str) -> str:
+        prompt = build_low_context_response_prompt(query=query)
+        response = self.client.models.generate_content(
+            model="gemma-4-31b-it",
+            contents=prompt,
+            config={
+                "temperature": 0.2,
+            },
+        )
+        return response.text
+
+    def stream_low_context_response(self, query: str) -> Iterator[str]:
+        prompt = build_low_context_response_prompt(query=query)
+
+        if not hasattr(self.client.models, "generate_content_stream"):
+            yield self.generate_low_context_response(query=query)
+            return
+
+        stream = self.client.models.generate_content_stream(
+            model="gemma-4-31b-it",
+            contents=prompt,
+            config={
+                "temperature": 0.2,
             },
         )
 

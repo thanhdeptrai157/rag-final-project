@@ -42,7 +42,6 @@ class QueryPipeline:
         )
 
         if route.strategy == QueryStrategy.LOW_CONTEXT_OR_INVALID:
-            answer = "Bạn vui lòng hỏi rõ hơn hoặc cung cấp thêm ngữ cảnh."
             yield self._status(
                 stage="expand_query",
                 status="skipped",
@@ -60,12 +59,16 @@ class QueryPipeline:
                 status="started",
                 message="Đang trả lời",
             )
-            for char in answer:
-                yield {
-                    "type": "answer_delta",
-                    "stage": "llm",
-                    "delta": char,
-                }
+            answer_parts = []
+            for chunk in self._stream_low_context_response(query=query):
+                for char in chunk:
+                    answer_parts.append(char)
+                    yield {
+                        "type": "answer_delta",
+                        "stage": "llm",
+                        "delta": char,
+                    }
+            answer = "".join(answer_parts)
             yield self._status(
                 stage="llm",
                 status="completed",
@@ -172,6 +175,32 @@ class QueryPipeline:
             return
 
         yield self.llm.generate_response(query=query, context=context)
+
+    def _stream_low_context_response(self, query: str) -> Iterator[str]:
+        fallback = "Bạn vui lòng hỏi rõ hơn hoặc cung cấp thêm ngữ cảnh."
+
+        try:
+            if hasattr(self.llm, "stream_low_context_response"):
+                yielded = False
+                for chunk in self.llm.stream_low_context_response(query=query):
+                    yielded = True
+                    yield chunk
+                if yielded:
+                    return
+
+            if hasattr(self.llm, "generate_low_context_response"):
+                answer = self.llm.generate_low_context_response(query=query)
+                if answer:
+                    yield answer
+                    return
+
+        except Exception as exc:
+            print(
+                "[LOW_CONTEXT] Failed to generate low-context response, "
+                f"falling back: {type(exc).__name__}: {exc}"
+            )
+
+        yield fallback
 
     def _status(self, stage: str, status: str, message: str, **data) -> dict:
         return {
