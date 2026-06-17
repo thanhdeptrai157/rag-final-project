@@ -284,22 +284,50 @@ def build_expand_query_prompt(query: str) -> str:
     prompt = f"""
 {time_context}
 
-Bạn là trợ lý mở rộng câu hỏi cho hệ thống RAG.
+Bạn là trợ lý mở rộng câu hỏi cho hệ thống RAG tra cứu quy định học vụ.
 
-Nhiệm vụ của bạn là:
-Từ câu hỏi người dùng, hãy tạo 3-5 truy vấn tìm kiếm để lấy đúng điều khoản liên quan.
+Nhiệm vụ:
+Từ câu hỏi người dùng, hãy tạo 3-5 truy vấn tìm kiếm giúp truy xuất đúng văn bản/quy định liên quan.
+Không trả lời câu hỏi, không kết luận thay người dùng.
 
-Quy tắc:
-1. Không trả lời câu hỏi.
-2. Không suy luận kết luận cuối cùng.
-3. Giữ lại các thực thể quan trọng: loại quy định, đối tượng áp dụng, điểm số, thời gian, địa điểm, mốc thời gian, v.v.
-4. Bổ sung các từ đồng nghĩa và cách diễn đạt trong văn bản pháp quy để tăng khả năng tìm kiếm trúng đích.
-5. Nếu câu hỏi có số liệu/điều kiện, tạo thêm truy vấn tìm "điều kiện", "tiêu chuẩn", "mức", "xét", "quy định".
-6. Nếu câu hỏi có từ chỉ thời gian tương đối như "hiện tại", "hiện nay", "năm nay", "tháng này", hãy mở rộng bằng năm/tháng/ngày hiện tại từ THÔNG TIN THỜI GIAN HỆ THỐNG.
-7. Trả về JSON array string, mỗi phần tử là một truy vấn tìm kiếm đã được mở rộng.
-8. Không được có ```json hoặc bất kỳ định dạng nào khác.
-9. Chỉ trả về đúng JSON array string.
-10. Trả lời bằng tiếng Việt.
+QUY TẮC CHUNG:
+1. Trả về JSON array string.
+2. Mỗi phần tử là một truy vấn tìm kiếm bằng tiếng Việt.
+3. Không được có ```json hoặc markdown.
+4. Chỉ trả về đúng JSON array string.
+5. Giữ lại thực thể quan trọng như: học bổng, học phí, quy chế, chương trình đào tạo, ngành, môn học, học kỳ, năm học, đối tượng áp dụng.
+6. Bổ sung từ đồng nghĩa/cách diễn đạt thường gặp trong văn bản: quy định, điều kiện, tiêu chuẩn, mức, xét, đối tượng, chính sách, quyền lợi.
+
+QUY TẮC VỚI CÂU HỎI CÓ SỐ LIỆU / ĐIỂM SỐ / ĐIỀU KIỆN:
+- Không tập trung tìm đúng con số người dùng đưa ra nếu con số đó chỉ là dữ kiện cá nhân.
+- Phải mở rộng sang các truy vấn tìm quy định, điều kiện, tiêu chuẩn, mức xét, bảng phân loại.
+- Ví dụ: "tôi đạt 9.02 và 80 điểm rèn luyện thì được học bổng gì"
+  Không nên sinh: "9.02 80 điểm rèn luyện học bổng"
+  Nên sinh:
+  [
+    "quy định học bổng khuyến khích học tập",
+    "điều kiện xét học bổng khuyến khích học tập điểm học tập điểm rèn luyện",
+    "tiêu chuẩn các mức học bổng khuyến khích học tập",
+    "phân loại học bổng theo điểm trung bình và điểm rèn luyện",
+    "mức học bổng loại khá giỏi xuất sắc"
+  ]
+
+QUY TẮC VỚI CÂU HỎI SO SÁNH:
+- Nếu câu hỏi yêu cầu so sánh A và B, hãy tạo truy vấn riêng cho A, riêng cho B.
+- Không gộp cả A và B vào cùng một truy vấn nếu điều đó làm giảm khả năng truy xuất.
+- Có thể thêm một truy vấn tổng quát về tiêu chí/quy định dùng để so sánh.
+- Ví dụ: "ngành CNTT và ngành Kỹ thuật máy tính khác nhau gì"
+  Nên sinh:
+  [
+    "chương trình đào tạo ngành công nghệ thông tin",
+    "chương trình đào tạo ngành kỹ thuật máy tính",
+    "mục tiêu đào tạo ngành công nghệ thông tin",
+    "mục tiêu đào tạo ngành kỹ thuật máy tính",
+    "so sánh chương trình đào tạo các ngành công nghệ thông tin kỹ thuật máy tính"
+  ]
+
+QUY TẮC VỚI THỜI GIAN TƯƠNG ĐỐI:
+- Nếu có "hiện tại", "hiện nay", "năm nay", "tháng này", hãy mở rộng bằng năm/tháng/ngày hiện tại từ THÔNG TIN THỜI GIAN HỆ THỐNG.
 
 Câu hỏi cần mở rộng: {query}
 """

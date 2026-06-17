@@ -262,8 +262,7 @@ class QueryPipeline:
                 """.strip())
 
             metadata = item.get("metadata") or {}
-            print("Metadata for item:", metadata)
-            print("item:", item)
+            print("chunk title:", item.get("title"))
             document_id = item.get("document_id")
 
             document_model = (

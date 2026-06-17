@@ -10,7 +10,6 @@ from app.models.document import Document
 from app.models.chunk import Chunk as ChunkModel
 from app.models.document_version import DocumentVersion
 from app.pipeline.query_pipeline import QueryPipeline
-from app.retrieval.cross_encoder_reranker import get_cross_encoder_reranker
 from app.retrieval.retriever import Retriever
 from app.services.storage.r2_storage import R2Storage
 
@@ -70,6 +69,10 @@ class RagService:
             return self._fallback_vector_rerank(results=results, top_k=top_k)
 
         try:
+            from app.retrieval.cross_encoder_reranker import (
+                get_cross_encoder_reranker,
+            )
+
             reranker = get_cross_encoder_reranker()
             reranked = reranker.rerank(
                 query=query,
