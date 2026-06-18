@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 @dataclass
 class ParsedChunk:
-    chunk_kind: str  # article | amendment | appendix | section | unknown
+    chunk_kind: str  # article | amendment | appendix | section | Lecturer | unknown
 
     title: str
     content: str
@@ -31,6 +31,14 @@ class ParsedChunk:
 
     target_article_number: Optional[str] = None
     target_clause_text: Optional[str] = None
+    target_point_text: Optional[str] = None
+
+    lecturer_name: Optional[str] = None
+    lecturer_unit: Optional[str] = None
+    lecturer_info: Optional[str] = None
+    lecturer_phone: Optional[str] = None
+    lecturer_email: Optional[str] = None
+    lecturers: Optional[List[Dict[str, str]]] = None
 
     # Layout information from MinerU para_blocks.
     # Each item keeps its own page_idx so downstream/highlight logic does not
@@ -95,6 +103,22 @@ class UniversalLegalParser:
 
     ARTICLE_ACTION_ASCII_RE = re.compile(
         r"(sua doi|bo sung|thay the|bai bo)\s+dieu\s+(\d+[a-zA-Z]?)",
+        re.I,
+    )
+
+    POINT_CLAUSE_ACTION_RE = re.compile(
+        r"(sửa đổi|bổ sung|thay thế|bãi bỏ)"
+        r".*?điểm\s+([a-zđ])"
+        r"\s+khoản\s+(\d+)"
+        r"\s+điều\s+(\d+[a-zA-Z]?)",
+        re.I,
+    )
+
+    POINT_CLAUSE_ACTION_ASCII_RE = re.compile(
+        r"(sua doi|bo sung|thay the|bai bo)"
+        r".*?diem\s+([a-zd])"
+        r"\s+khoan\s+(\d+)"
+        r"\s+dieu\s+(\d+[a-zA-Z]?)",
         re.I,
     )
 
@@ -198,6 +222,14 @@ class UniversalLegalParser:
         text = self._break_trailing_numbered_heading(text)
         text = self._break_inline_headings(text)
         # self._dump_debug_text(text)
+
+        lecturer_chunks = self._parse_lecturer_document(
+            text,
+            layout_index=layout_index,
+        )
+        if lecturer_chunks:
+            return self._post_process(lecturer_chunks)
+
         blocks = self._split_by_major_blocks(text, layout_index=layout_index)
 
         if blocks:
@@ -564,6 +596,233 @@ class UniversalLegalParser:
                 texts.append(child_text)
 
         return " ".join(texts).strip()
+
+    # ------------------------------------------------------------------
+    # Lecturer directory parsing
+    # ------------------------------------------------------------------
+
+    def _parse_lecturer_document(
+        self,
+        text: str,
+        layout_index: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[ParsedChunk]:
+        if not self._looks_like_lecturer_document(text):
+            return []
+
+        records: List[Dict[str, Any]] = []
+        raw_blocks = re.split(r"\s*={5,}\s*", text)
+
+        for raw_block in raw_blocks:
+            block = self._normalize_content(raw_block)
+            if not block or self._is_lecturer_header_block(block):
+                continue
+
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            fields = self._extract_lecturer_record_fields(block)
+            name = fields.get("name")
+            unit = fields.get("unit")
+            info = fields.get("info")
+            phone = fields.get("phone")
+            email = fields.get("email")
+
+            if not self._is_valid_lecturer_record(
+                name=name,
+                unit=unit,
+                info=info,
+                phone=phone,
+                email=email,
+            ):
+                continue
+
+            records.append(
+                {
+                    "name": name or "",
+                    "unit": unit or "",
+                    "info": info or "",
+                    "phone": phone or "",
+                    "email": email or "",
+                    "content": block,
+                    "lines": lines,
+                }
+            )
+
+        grouped_records: Dict[str, List[Dict[str, Any]]] = {}
+        for record in records:
+            group_key = record["unit"] or "Không rõ đơn vị"
+            grouped_records.setdefault(group_key, []).append(record)
+
+        chunks: List[ParsedChunk] = []
+        for unit, unit_records in grouped_records.items():
+            content = self._build_lecturer_unit_content(unit, unit_records)
+            title = f"Thông tin giảng viên: {unit}"
+            section_path = f"Thông tin giảng viên > {unit}"
+            layout_lines = [
+                line
+                for record in unit_records
+                for line in record.get("lines", [])
+            ]
+
+            lecturers = [
+                {
+                    "name": record["name"],
+                    "unit": record["unit"],
+                    "info": record["info"],
+                    "phone": record["phone"],
+                    "email": record["email"],
+                }
+                for record in unit_records
+            ]
+
+            chunk = ParsedChunk(
+                chunk_kind="Lecturer",
+                title=title,
+                content=content,
+                section_path=section_path,
+                lecturer_unit=unit,
+                lecturers=lecturers,
+            )
+            self._apply_layout_payload(
+                chunk,
+                self._layout_payload_for_lines(layout_lines, layout_index),
+            )
+            chunks.append(chunk)
+
+        return chunks
+
+    def _build_lecturer_unit_content(
+        self,
+        unit: str,
+        records: List[Dict[str, Any]],
+    ) -> str:
+        parts = [
+            f"Đơn vị: {unit}",
+            f"Số lượng giảng viên/cán bộ: {len(records)}",
+            "",
+        ]
+
+        for idx, record in enumerate(records, start=1):
+            parts.append(f"{idx}. Tên: {record['name']}")
+            if record["info"]:
+                parts.append(f"   Thông tin: {record['info']}")
+            if record["phone"]:
+                parts.append(f"   Điện thoại: {record['phone']}")
+            if record["email"]:
+                parts.append(f"   Email: {record['email']}")
+            parts.append("")
+
+        return self._normalize_content("\n".join(parts))
+
+    def _looks_like_lecturer_document(self, text: str) -> bool:
+        for line in text.splitlines():
+            folded_line = self._fold_text(line.strip())
+            if not folded_line:
+                continue
+
+            return folded_line == "thong tin giang vien"
+
+        return False
+
+    def _is_lecturer_header_block(self, block: str) -> bool:
+        folded = self._fold_text(block)
+        return folded.strip() == "thong tin giang vien"
+
+    def _extract_lecturer_record_fields(self, block: str) -> Dict[str, str | None]:
+        text = self._normalize_content(block)
+
+        unit_start = self._find_lecturer_label(text, ["đơn vị", "don vi"], 0)
+        name_start = self._find_lecturer_label(
+            text,
+            ["tên", "ten"],
+            unit_start[1] if unit_start else 0,
+        )
+        info_start = self._find_lecturer_label(
+            text,
+            ["thông tin", "thong tin"],
+            name_start[1] if name_start else 0,
+        )
+        phone_start = self._find_lecturer_label(
+            text,
+            ["điện thoại", "dien thoai"],
+            info_start[1] if info_start else 0,
+        )
+        email_start = self._find_lecturer_label(
+            text,
+            ["email"],
+            phone_start[1] if phone_start else 0,
+        )
+
+        unit = self._slice_lecturer_value(text, unit_start, name_start)
+        name = self._slice_lecturer_value(text, name_start, info_start)
+        info = self._slice_lecturer_value(text, info_start, phone_start)
+        phone = self._slice_lecturer_value(text, phone_start, email_start)
+        email_tail = self._slice_lecturer_value(text, email_start, None)
+
+        email = None
+        email_match = re.search(
+            r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+",
+            email_tail or "",
+            flags=re.I,
+        )
+        if email_match:
+            email = email_match.group(0)
+
+        return {
+            "unit": unit,
+            "name": name,
+            "info": info,
+            "phone": phone,
+            "email": email,
+        }
+
+    def _find_lecturer_label(
+        self,
+        text: str,
+        labels: List[str],
+        start: int = 0,
+    ) -> Optional[Tuple[int, int]]:
+        label_pattern = "|".join(re.escape(label) for label in labels)
+        pattern = re.compile(
+            rf"(?<!\S)(?:{label_pattern})\s*:",
+            flags=re.I,
+        )
+
+        match = pattern.search(text, pos=start)
+        if match:
+            return match.start(), match.end()
+
+        return None
+
+    def _slice_lecturer_value(
+        self,
+        text: str,
+        start_label: Optional[Tuple[int, int]],
+        end_label: Optional[Tuple[int, int]],
+    ) -> str | None:
+        if not start_label:
+            return None
+
+        start = start_label[1]
+        end = end_label[0] if end_label else len(text)
+        value = self._clean_line(text[start:end])
+        return value or None
+
+    def _is_valid_lecturer_record(
+        self,
+        *,
+        name: str | None,
+        unit: str | None,
+        info: str | None,
+        phone: str | None,
+        email: str | None,
+    ) -> bool:
+        if not name:
+            return False
+
+        folded_name = self._fold_text(name)
+        if folded_name in {"ho va ten", "ten", "ho va ten, chuc danh, chuc vu"}:
+            return False
+
+        return bool(unit or info or phone or email)
 
     # ------------------------------------------------------------------
     # Split major blocks: Article / Appendix / Chapter / Section
@@ -1238,6 +1497,29 @@ class UniversalLegalParser:
 
         title_folded = self._fold_text(title)
 
+        point_clause_match = self.POINT_CLAUSE_ACTION_RE.search(title)
+        if not point_clause_match:
+            point_clause_match = self.POINT_CLAUSE_ACTION_ASCII_RE.search(
+                title_folded
+            )
+
+        if point_clause_match:
+            return ParsedChunk(
+                chunk_kind="amendment",
+                title=title,
+                content=content,
+                part_title=article.get("part_title"),
+                chapter_title=article.get("chapter_title"),
+                section_title=article.get("section_title"),
+                article_title=article.get("article_title"),
+                article_number=article.get("article_number"),
+                order_number=item.get("order_number"),
+                action=self._normalize_action(point_clause_match.group(1)),
+                target_point_text=point_clause_match.group(2).strip(),
+                target_clause_text=point_clause_match.group(3).strip(),
+                target_article_number=point_clause_match.group(4).strip(),
+            )
+
         clause_match = self.CLAUSE_ACTION_RE.search(title)
         if not clause_match:
             clause_match = self.CLAUSE_ACTION_ASCII_RE.search(title_folded)
@@ -1557,8 +1839,10 @@ class UniversalLegalParser:
         folded = self._fold_text(text)
 
         patterns = [
-            r"(sửa đổi|bổ sung|thay thế|bãi bỏ)\s+(điều|khoản|điểm)\s+\d+",
-            r"(sua doi|bo sung|thay the|bai bo)\s+(dieu|khoan|diem)\s+\d+",
+            r"(sửa đổi|bổ sung|thay thế|bãi bỏ).*?(điều|khoản)\s+\d+",
+            r"(sua doi|bo sung|thay the|bai bo).*?(dieu|khoan)\s+\d+",
+            r"(sửa đổi|bổ sung|thay thế|bãi bỏ).*?điểm\s+[a-zđ]\s+khoản\s+\d+\s+điều\s+\d+",
+            r"(sua doi|bo sung|thay the|bai bo).*?diem\s+[a-zd]\s+khoan\s+\d+\s+dieu\s+\d+",
         ]
 
         return any(re.search(p, folded, re.I) for p in patterns)

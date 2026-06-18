@@ -221,6 +221,8 @@ YÊU CẦU TRẢ LỜI
 - Trả lời bằng tiếng Việt.
 - Trả lời đầy đủ nhất có thể.
 - Trả về Markdown hợp lệ.
+- Thông tin giảng viên thì phải đầy đủ: tên, đơn vị, bộ môn/khoa, chức danh/chức vụ, email, số điện thoại, liên hệ, lý lịch khoa học. Không được bịa thông tin giảng viên.
+- Trả lời dài nhất có thể dựa trên thông tin đã cho, không được bỏ sót chi tiết quan trọng.
 - Sử dụng tiêu đề, danh sách, bảng khi phù hợp.
 - Nếu phát hiện sửa đổi văn bản:
 
@@ -347,6 +349,7 @@ Các strategy hợp lệ:
 - exact_legal_lookup: CHỈ dùng khi hỏi trực tiếp về điều/khoản/điểm hoặc một số điều cụ thể.
 - appendix_lookup: CHỈ dùng khi câu hỏi nhắc rõ phụ lục, biểu mẫu, mẫu đơn, mẫu phiếu, bảng quy đổi, khung năng lực, hoặc danh mục trong phụ lục.
 - amendment_lookup: CHỈ dùng khi hỏi về sửa đổi, bổ sung, bãi bỏ, thay thế, nội dung hiện hành, khác biệt giữa bản mới/cũ.
+- lecturer_lookup: Dùng khi hỏi thông tin giảng viên/cán bộ/trợ giảng/thỉnh giảng như tên, đơn vị, bộ môn, khoa, chức danh, chức vụ, email, số điện thoại, liên hệ, lý lịch khoa học.
 - broad_semantic_rag: câu hỏi nội dung tổng quát cần tìm kiếm ngữ nghĩa.
 - low_context_or_invalid: câu quá ngắn, chào hỏi, không rõ nghĩa, hoặc không liên quan tài liệu.
 
@@ -357,8 +360,9 @@ Quy tắc:
 4. Nếu thấy phụ lục, điền appendix_number dạng chuỗi in hoa, ví dụ "I", "II", "3".
 5. confidence nằm trong khoảng 0 đến 1.
 6. Không chọn appendix_lookup chỉ vì câu hỏi có từ điểm, ngành, năm, bảng điểm, điểm chuẩn.
-7. Các câu hỏi về điểm chuẩn, điểm tốt nghiệp, xếp loại, ngành tuyển sinh, năm tuyển sinh => broad_semantic_rag, trừ khi có nhắc rõ phụ lục/bảng quy đổi/khung năng lực.
-8. Nếu câu hỏi có thời gian tương đối như "hiện tại", "hiện nay", "năm nay", "tháng này", vẫn định tuyến theo nội dung chính của câu hỏi, nhưng hiểu thời gian dựa trên THÔNG TIN THỜI GIAN HỆ THỐNG.
+7. Các câu hỏi về giảng viên, tên giảng viên, email, số điện thoại, đơn vị, bộ môn/khoa của giảng viên => lecturer_lookup.
+8. Các câu hỏi về điểm chuẩn, điểm tốt nghiệp, xếp loại, ngành tuyển sinh, năm tuyển sinh, ngành đào tạo => broad_semantic_rag, trừ khi có nhắc rõ phụ lục/bảng quy đổi/khung năng lực.
+9. Nếu câu hỏi có thời gian tương đối như "hiện tại", "hiện nay", "năm nay", "tháng này", vẫn định tuyến theo nội dung chính của câu hỏi, nhưng hiểu thời gian dựa trên THÔNG TIN THỜI GIAN HỆ THỐNG.
 
 Schema:
 {{

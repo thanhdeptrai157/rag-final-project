@@ -6,6 +6,7 @@ class QueryStrategy(str, Enum):
     EXACT_LEGAL_LOOKUP = "exact_legal_lookup"
     APPENDIX_LOOKUP = "appendix_lookup"
     AMENDMENT_LOOKUP = "amendment_lookup"
+    LECTURER_LOOKUP = "lecturer_lookup"
     BROAD_SEMANTIC_RAG = "broad_semantic_rag"
     LOW_CONTEXT_OR_INVALID = "low_context_or_invalid"
 

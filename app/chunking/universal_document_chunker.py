@@ -62,6 +62,9 @@ class UniversalLegalChunker:
         return chunks
 
     def _build_chunk_type(self, item: ParsedChunk) -> str:
+        if item.chunk_kind == "Lecturer":
+            return "Lecturer"
+
         if item.chunk_kind == "amendment":
             return "regulation_amendment"
 
@@ -128,6 +131,23 @@ class UniversalLegalChunker:
         parts: List[str] = []
 
         parts.append(f"Tài liệu: {document.title}")
+
+        if item.chunk_kind == "Lecturer":
+            parts.append("Loại chunk: Lecturer")
+            if item.lecturer_unit:
+                parts.append(f"Đơn vị: {item.lecturer_unit}")
+            if item.lecturers:
+                parts.append(f"Số lượng giảng viên/cán bộ: {len(item.lecturers)}")
+                names = [
+                    lecturer.get("name", "")
+                    for lecturer in item.lecturers
+                    if lecturer.get("name")
+                ]
+                if names:
+                    parts.append(f"Danh sách tên: {', '.join(names)}")
+            parts.append("Nội dung:")
+            parts.append(item.content)
+            return "\n".join(parts)
 
         if item.chunk_kind == "amendment":
             parts.append("Loại chunk: Nội dung sửa đổi/bổ sung/bãi bỏ")
@@ -213,7 +233,6 @@ class UniversalLegalChunker:
         page_indices = self._extract_page_indices(item)
         page_start = min(page_indices) + 1 if page_indices else None
         page_end = max(page_indices) + 1 if page_indices else None
-
         metadata = {
             "source": document.source_path,
             "source_type": document.source_type,
@@ -292,8 +311,31 @@ class UniversalLegalChunker:
                 }
             )
 
+        if item.chunk_kind == "Lecturer":
+            metadata.update(
+                {
+                    "entity_type": "Lecturer",
+                    "lecturer_unit": item.lecturer_unit,
+                    "lecturer_count": len(item.lecturers or []),
+                    "lecturer_names": self._extract_lecturer_values(item, "name"),
+                    "lecturer_emails": self._extract_lecturer_values(item, "email"),
+                    "lecturer_phones": self._extract_lecturer_values(item, "phone"),
+                    "lecturers": item.lecturers,
+                }
+            )
+
         return metadata
 
+
+    def _extract_lecturer_values(self, item: ParsedChunk, key: str) -> List[str]:
+        values: List[str] = []
+
+        for lecturer in item.lecturers or []:
+            value = lecturer.get(key)
+            if value:
+                values.append(value)
+
+        return values
 
     def _extract_page_indices(self, item: ParsedChunk) -> List[int]:
         """

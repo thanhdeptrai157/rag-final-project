@@ -62,6 +62,11 @@ class QdrantStore:
             "metadata.document_version_id": models.PayloadSchemaType.KEYWORD,
             "metadata.status": models.PayloadSchemaType.KEYWORD,
             "metadata.is_current": models.PayloadSchemaType.BOOL,
+            "metadata.chunk_kind": models.PayloadSchemaType.KEYWORD,
+            "metadata.entity_type": models.PayloadSchemaType.KEYWORD,
+            "metadata.lecturer_unit": models.PayloadSchemaType.KEYWORD,
+            "metadata.lecturer_names": models.PayloadSchemaType.KEYWORD,
+            "metadata.lecturer_emails": models.PayloadSchemaType.KEYWORD,
         }
 
         for field_name, field_schema in indexes.items():

@@ -54,6 +54,9 @@ class QueryRouter:
                 use_query_expansion=False,
             )
 
+        if self._has_lecturer_lookup_intent(normalized):
+            return self._lecturer_route(normalized=normalized, top_k=top_k)
+
         appendix_number = self._extract_appendix_number(normalized)
         if appendix_number or self._has_appendix_intent(normalized):
             filters = {"chunk_kind": "appendix"}
@@ -127,6 +130,23 @@ class QueryRouter:
                 top_k=top_k,
                 candidate_top_k=max(top_k * 3, 8),
                 use_query_expansion=False,
+            )
+
+        if strategy == QueryStrategy.LECTURER_LOOKUP:
+            if not self._has_lecturer_lookup_intent(normalized) and confidence < 0.8:
+                return self._broad_route(
+                    normalized=normalized,
+                    top_k=top_k,
+                    boosts={
+                        "llm_confidence": confidence,
+                        "llm_rejected_strategy": "lecturer_lookup",
+                    },
+                )
+
+            return self._lecturer_route(
+                normalized=normalized,
+                top_k=top_k,
+                boosts={"llm_confidence": confidence},
             )
 
         if strategy == QueryStrategy.APPENDIX_LOOKUP:
@@ -208,6 +228,98 @@ class QueryRouter:
             candidate_top_k=max(top_k * 4, 12),
             use_query_expansion=True,
         )
+
+    def _lecturer_route(
+        self, normalized: str, top_k: int, boosts: dict | None = None
+    ) -> QueryRoute:
+        selected_top_k = (
+            max(top_k, 10)
+            if self._is_lecturer_list_intent(normalized)
+            else top_k
+        )
+
+        return QueryRoute(
+            strategy=QueryStrategy.LECTURER_LOOKUP,
+            normalized_query=normalized,
+            filters={"chunk_kind": "Lecturer"},
+            boosts=boosts or {},
+            top_k=selected_top_k,
+            candidate_top_k=max(selected_top_k * 3, 15),
+            use_query_expansion=False,
+            use_related_chunk_expansion=False,
+        )
+
+    def _is_lecturer_list_intent(self, text: str) -> bool:
+        return any(
+            term in text
+            for term in [
+                "danh sach",
+                "liet ke",
+                "cac giang vien",
+                "nhung giang vien",
+                "giang vien khoa",
+                "giang vien bo mon",
+                "thuoc khoa",
+                "thuoc bo mon",
+                "khoa cntt",
+                "cong nghe thong tin",
+                "bo mon",
+            ]
+        )
+
+    def _has_lecturer_lookup_intent(self, text: str) -> bool:
+        lecturer_terms = [
+            "giang vien",
+            "giao vien",
+            "can bo",
+            "nhan su",
+            "tro giang",
+            "thinh giang",
+            "ly lich khoa hoc",
+        ]
+        contact_terms = [
+            "email",
+            "mail",
+            "dien thoai",
+            "so dien thoai",
+            "sdt",
+            "lien he",
+            "thong tin",
+        ]
+        directory_terms = [
+            "danh sach",
+            "thuoc khoa",
+            "thuoc bo mon",
+            "bo mon nao",
+            "khoa nao",
+            "la ai",
+            "ten giang vien",
+        ]
+        legal_terms = [
+            "quy dinh",
+            "quy che",
+            "dieu kien",
+            "nghia vu",
+            "trach nhiem",
+            "hoc vu",
+            "dao tao",
+        ]
+
+        has_lecturer_term = any(term in text for term in lecturer_terms)
+        has_contact_term = any(term in text for term in contact_terms)
+        has_directory_term = any(term in text for term in directory_terms)
+        has_legal_term = any(term in text for term in legal_terms)
+
+        if has_legal_term and not (has_contact_term or has_directory_term):
+            return False
+
+        if has_lecturer_term:
+            return True
+
+        if has_contact_term and re.search(r"\bcua\b", text):
+            return True
+
+        return has_directory_term and has_contact_term
 
     def _has_appendix_intent(self, text: str) -> bool:
         positive_patterns = [
