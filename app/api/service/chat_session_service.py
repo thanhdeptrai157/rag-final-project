@@ -208,6 +208,8 @@ class ChatMessageService:
                 detail="Message content is required",
             )
 
+        chat_history = self._load_chat_history(session.id)
+
         user_message = ChatMessage(
             session_id=session.id,
             role="user",
@@ -218,7 +220,11 @@ class ChatMessageService:
 
         start = _utcnow()
         try:
-            result = self.chat_repo.answer_query(question=content, top_k=3)
+            result = self.chat_repo.answer_query(
+                question=content,
+                top_k=3,
+                chat_history=chat_history,
+            )
         except Exception as exc:
             result = {
                 "answer": f"Error processing request: {str(exc)}",
@@ -274,14 +280,22 @@ class ChatMessageService:
                 detail="Message content is required",
             )
 
+        chat_history = self._load_chat_history(session.id)
+
         return self._stream_send_message_events(
             current_user=current_user,
             session=session,
             content=content,
+            chat_history=chat_history,
         )
 
     def _stream_send_message_events(
-        self, *, current_user: User, session: ChatSession, content: str
+        self,
+        *,
+        current_user: User,
+        session: ChatSession,
+        content: str,
+        chat_history: list[dict] | None = None,
     ) -> Iterator[str]:
         user_message = ChatMessage(
             session_id=session.id,
@@ -309,7 +323,11 @@ class ChatMessageService:
         }
 
         try:
-            for event in self.chat_repo.stream_answer_query(question=content, top_k=3):
+            for event in self.chat_repo.stream_answer_query(
+                question=content,
+                top_k=3,
+                chat_history=chat_history,
+            ):
                 event_type = event.get("type")
 
                 if event_type == "answer_delta":
@@ -418,6 +436,27 @@ class ChatMessageService:
                 else None
             ),
         )
+
+    def _load_chat_history(
+        self,
+        session_id: UUID,
+        limit: int = 12,
+    ) -> list[dict]:
+        messages = (
+            self.db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            {
+                "role": message.role,
+                "content": message.content,
+            }
+            for message in reversed(messages)
+        ]
 
     def _generate_title(self, content: str) -> str:
         title = " ".join(content.split())

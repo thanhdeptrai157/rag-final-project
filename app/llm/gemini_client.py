@@ -15,8 +15,17 @@ class GeminiClient:
     def __init__(self):
         self.client = genai.Client(api_key=Config.GEMINI_API_KEY)
 
-    def generate_response(self, query: str, context: str) -> str:
-        prompt = build_rag_prompt(query=query, context=context)
+    def generate_response(
+        self,
+        query: str,
+        context: str,
+        chat_history: list[dict] | None = None,
+    ) -> str:
+        prompt = build_rag_prompt(
+            query=query,
+            context=context,
+            chat_history=chat_history,
+        )
         response = self.client.models.generate_content(
             model="gemma-4-31b-it",
             contents=prompt,
@@ -26,11 +35,24 @@ class GeminiClient:
         )
         return response.text
 
-    def stream_generate_response(self, query: str, context: str) -> Iterator[str]:
-        prompt = build_rag_prompt(query=query, context=context)
+    def stream_generate_response(
+        self,
+        query: str,
+        context: str,
+        chat_history: list[dict] | None = None,
+    ) -> Iterator[str]:
+        prompt = build_rag_prompt(
+            query=query,
+            context=context,
+            chat_history=chat_history,
+        )
 
         if not hasattr(self.client.models, "generate_content_stream"):
-            yield self.generate_response(query=query, context=context)
+            yield self.generate_response(
+                query=query,
+                context=context,
+                chat_history=chat_history,
+            )
             return
 
         stream = self.client.models.generate_content_stream(
@@ -46,8 +68,15 @@ class GeminiClient:
             if text:
                 yield text
 
-    def generate_low_context_response(self, query: str) -> str:
-        prompt = build_low_context_response_prompt(query=query)
+    def generate_low_context_response(
+        self,
+        query: str,
+        chat_history: list[dict] | None = None,
+    ) -> str:
+        prompt = build_low_context_response_prompt(
+            query=query,
+            chat_history=chat_history,
+        )
         response = self.client.models.generate_content(
             model="gemma-4-31b-it",
             contents=prompt,
@@ -57,11 +86,21 @@ class GeminiClient:
         )
         return response.text
 
-    def stream_low_context_response(self, query: str) -> Iterator[str]:
-        prompt = build_low_context_response_prompt(query=query)
+    def stream_low_context_response(
+        self,
+        query: str,
+        chat_history: list[dict] | None = None,
+    ) -> Iterator[str]:
+        prompt = build_low_context_response_prompt(
+            query=query,
+            chat_history=chat_history,
+        )
 
         if not hasattr(self.client.models, "generate_content_stream"):
-            yield self.generate_low_context_response(query=query)
+            yield self.generate_low_context_response(
+                query=query,
+                chat_history=chat_history,
+            )
             return
 
         stream = self.client.models.generate_content_stream(

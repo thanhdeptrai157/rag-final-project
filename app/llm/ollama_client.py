@@ -34,12 +34,30 @@ class OllamaClient:
 
         return response["message"]["content"]
 
-    def generate_response(self, query: str, context: str) -> str:
-        prompt = build_rag_prompt(query=query, context=context)
+    def generate_response(
+        self,
+        query: str,
+        context: str,
+        chat_history: list[dict] | None = None,
+    ) -> str:
+        prompt = build_rag_prompt(
+            query=query,
+            context=context,
+            chat_history=chat_history,
+        )
         return self._chat(prompt, temperature=0.3)
 
-    def stream_generate_response(self, query: str, context: str) -> Iterator[str]:
-        prompt = build_rag_prompt(query=query, context=context)
+    def stream_generate_response(
+        self,
+        query: str,
+        context: str,
+        chat_history: list[dict] | None = None,
+    ) -> Iterator[str]:
+        prompt = build_rag_prompt(
+            query=query,
+            context=context,
+            chat_history=chat_history,
+        )
         stream = self.client.chat(
             model=self.model,
             messages=[
@@ -59,12 +77,26 @@ class OllamaClient:
             if content:
                 yield content
 
-    def generate_low_context_response(self, query: str) -> str:
-        prompt = build_low_context_response_prompt(query=query)
+    def generate_low_context_response(
+        self,
+        query: str,
+        chat_history: list[dict] | None = None,
+    ) -> str:
+        prompt = build_low_context_response_prompt(
+            query=query,
+            chat_history=chat_history,
+        )
         return self._chat(prompt, temperature=0.2)
 
-    def stream_low_context_response(self, query: str) -> Iterator[str]:
-        prompt = build_low_context_response_prompt(query=query)
+    def stream_low_context_response(
+        self,
+        query: str,
+        chat_history: list[dict] | None = None,
+    ) -> Iterator[str]:
+        prompt = build_low_context_response_prompt(
+            query=query,
+            chat_history=chat_history,
+        )
         stream = self.client.chat(
             model=self.model,
             messages=[

@@ -32,11 +32,45 @@ hãy diễn giải dựa trên thời gian hệ thống ở trên.
 """.strip()
 
 
-def build_rag_prompt(query: str, context: str) -> str:
+def build_chat_history_context(chat_history: list[dict] | None) -> str:
+    if not chat_history:
+        return ""
+
+    lines = []
+    for item in chat_history[-12:]:
+        role = str((item or {}).get("role") or "").strip()
+        content = str((item or {}).get("content") or "").strip()
+
+        if role not in {"user", "assistant"} or not content:
+            continue
+
+        label = "Nguoi dung" if role == "user" else "Tro ly"
+        lines.append(f"{label}: {content}")
+
+    if not lines:
+        return ""
+
+    return f"""
+[CHAT_HISTORY]
+{chr(10).join(lines)}
+[/CHAT_HISTORY]
+
+Chỉ dùng CHAT_HISTORY để nắm ngữ cảnh của cuộc hội thoại (câu hỏi tiếp theo, đại từ, nội dung đã nhắc trước đó). Tuyệt đối không dùng CHAT_HISTORY làm nguồn trích dẫn; mọi trích dẫn phải chỉ đến từ CONTEXT.
+""".strip()
+
+
+def build_rag_prompt(
+    query: str,
+    context: str,
+    chat_history: list[dict] | None = None,
+) -> str:
     time_context = build_current_time_context()
+    history_context = build_chat_history_context(chat_history)
 
     prompt = f"""
 {time_context}
+
+{history_context}
 
 Bạn là trợ lý trả lời câu hỏi dựa trên thông tin được cung cấp.
 
@@ -237,8 +271,12 @@ YÊU CẦU TRẢ LỜI
     return prompt.strip()
 
 
-def build_low_context_response_prompt(query: str) -> str:
+def build_low_context_response_prompt(
+    query: str,
+    chat_history: list[dict] | None = None,
+) -> str:
     time_context = build_current_time_context()
+    history_context = build_chat_history_context(chat_history)
 
     prompt = f"""
 {time_context}
@@ -277,6 +315,9 @@ Yêu cầu bắt buộc:
 - Chỉ xuất ra câu trả lời cuối cùng, không giải thích phân loại.
 - Độ dài tối đa 4 câu.
 """
+    if history_context:
+        prompt = prompt.replace(time_context, f"{time_context}\n\n{history_context}", 1)
+
     return prompt.strip()
 
 

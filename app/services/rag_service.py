@@ -27,11 +27,29 @@ class RagService:
             rag_helpers=self,
         )
 
-    def answer_query(self, query: str, top_k: int = 1) -> dict:
-        return self.query_pipeline.run(query=query, top_k=top_k)
+    def answer_query(
+        self,
+        query: str,
+        top_k: int = 1,
+        chat_history: list[dict] | None = None,
+    ) -> dict:
+        return self.query_pipeline.run(
+            query=query,
+            top_k=top_k,
+            chat_history=chat_history,
+        )
 
-    def stream_answer_query(self, query: str, top_k: int = 1):
-        yield from self.query_pipeline.stream(query=query, top_k=top_k)
+    def stream_answer_query(
+        self,
+        query: str,
+        top_k: int = 1,
+        chat_history: list[dict] | None = None,
+    ):
+        yield from self.query_pipeline.stream(
+            query=query,
+            top_k=top_k,
+            chat_history=chat_history,
+        )
 
     def _normalize_expanded_queries(
         self, query: str, expanded_queries: list[str] | None
